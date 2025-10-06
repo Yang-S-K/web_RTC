@@ -27,77 +27,60 @@ const log = (msg) => {
 };
 
 // ===== UI 控制 =====
-function showInRoomUI(roomId, showQR) {
-  document.getElementById("createSection").style.display = "none";
-  document.getElementById("joinSection").style.display = "none";
-  document.getElementById("leaveSection").style.display = "block";
+function showInRoomUI(roomId) {
+  // 隱藏大廳
+  document.getElementById("lobby").classList.add("hidden");
+  
+  // 顯示房間資訊和主要內容
+  document.getElementById("roomInfo").classList.remove("hidden");
+  document.getElementById("mainContent").classList.remove("hidden");
+  
+  // 更新房號顯示
   document.getElementById("roomIdDisplay").textContent = "房號: " + roomId;
   
-  // 根據參數決定是否顯示 QR Code
-  const canvas = document.getElementById("qrcode");
-  canvas.style.display = showQR ? "block" : "none";
+  // 顯示 QR Section
+  document.getElementById("qrSection").style.display = "flex";
 }
 
-function setShareButton(url) {
-  const shareBtn = document.getElementById("shareBtn");
-  if (url) {
-    shareBtn.style.display = "inline-block";
-    shareBtn.onclick = () => shareRoom(url);
-  } else {
-    shareBtn.style.display = "none";
-    shareBtn.onclick = null;
-  }
+function updateMemberCount(count) {
+  const memberCountEl = document.getElementById("memberCount");
+  memberCountEl.textContent = `👥 ${count} 人`;
 }
 
-function updateRoomLinkUI(url, showQRCode) {
+function updateRoomLinkUI(url) {
   const canvas = document.getElementById("qrcode");
-  if (!canvas) {
-    setShareButton(url);
-    return;
+  
+  if (url && window.QRCode && typeof QRCode.toCanvas === "function") {
+    QRCode.toCanvas(canvas, url, (err) => {
+      if (err) log("❌ QR Code 生成失敗");
+    });
   }
-
-  if (showQRCode && url) {
-    if (window.QRCode && typeof QRCode.toCanvas === "function") {
-      canvas.style.display = "block";
-      QRCode.toCanvas(canvas, url, (err) => {
-        if (err) log("❌ QR Code 生成失敗");
-      });
-    } else {
-      canvas.style.display = "none";
-      log("⚠️ QR Code 套件尚未載入，無法生成 QR Code");
-    }
-  } else {
-    canvas.style.display = "none";
-    const context = canvas.getContext("2d");
-    if (context) {
-      context.clearRect(0, 0, canvas.width, canvas.height);
-    }
-  }
-
-  setShareButton(url);
 }
 
 function resetUI() {
-  document.getElementById("createSection").style.display = "block";
-  document.getElementById("joinSection").style.display = "block";
-  document.getElementById("leaveSection").style.display = "none";
+  // 顯示大廳
+  document.getElementById("lobby").classList.remove("hidden");
+  
+  // 隱藏房間資訊和主要內容
+  document.getElementById("roomInfo").classList.add("hidden");
+  document.getElementById("mainContent").classList.add("hidden");
+  document.getElementById("qrSection").style.display = "none";
+  
+  // 清空房號
   document.getElementById("roomIdDisplay").textContent = "";
   
+  // 清除 QR Code
   const canvas = document.getElementById("qrcode");
-  canvas.style.display = "none";
   const context = canvas.getContext("2d");
   if (context) {
     context.clearRect(0, 0, canvas.width, canvas.height);
   }
-  
-  updateRoomLinkUI(null, false);
 }
 
-// ===== 開房 (修正版) =====
+// ===== 開房 =====
 document.getElementById("createRoomBtn").onclick = async () => {
   currentRoomId = Math.random().toString(36).substring(2, 7);
   
-  // 新的資料結構：包含 members 和 hostId
   const roomData = {
     createdAt: Date.now(),
     hostId: currentUserId,
@@ -117,6 +100,8 @@ document.getElementById("createRoomBtn").onclick = async () => {
     const members = snapshot.val();
     if (members) {
       const memberCount = Object.keys(members).length;
+      updateMemberCount(memberCount);
+      
       if (memberCount !== lastMemberCount) {
         log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
         lastMemberCount = memberCount;
@@ -126,18 +111,20 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
   const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
   
-  // 更新 UI (只呼叫一次)
-  showInRoomUI(currentRoomId, true);
-  
-  // 生成 QR Code 和設置分享按鈕
-  updateRoomLinkUI(url, true);
+  // 更新 UI
+  showInRoomUI(currentRoomId);
+  updateRoomLinkUI(url);
 
   log("🎯 你是 Host");
   log("✅ 建立房間: " + currentRoomId);
 };
 
 // ===== 分享房間 =====
-async function shareRoom(url) {
+document.getElementById("shareBtn").onclick = async () => {
+  if (!currentRoomId) return;
+  
+  const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+  
   if (navigator.share) {
     try {
       await navigator.share({
@@ -165,9 +152,9 @@ async function shareRoom(url) {
       log("✅ 連結已複製");
     }
   }
-}
+};
 
-// ===== 加入房間 (修正版) =====
+// ===== 加入房間 =====
 async function joinRoom(roomId) {
   const roomRef = ref(db, "rooms/" + roomId);
   const snap = await get(roomRef);
@@ -191,6 +178,8 @@ async function joinRoom(roomId) {
     const members = snapshot.val();
     if (members) {
       const memberCount = Object.keys(members).length;
+      updateMemberCount(memberCount);
+      
       if (memberCount !== lastMemberCount) {
         log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
         lastMemberCount = memberCount;
@@ -198,7 +187,7 @@ async function joinRoom(roomId) {
     }
   });
 
-  // 監聽 Host 變化（用於 Host 交接）
+  // 監聽 Host 變化
   let lastHostId = null;
   hostListener = onValue(ref(db, "rooms/" + currentRoomId + "/hostId"), (snapshot) => {
     const hostId = snapshot.val();
@@ -212,11 +201,9 @@ async function joinRoom(roomId) {
 
   const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
   
-  // 更新 UI (只呼叫一次)
-  showInRoomUI(roomId, true);
-  
-  // 生成 QR Code 和設置分享按鈕
-  updateRoomLinkUI(url, true);
+  // 更新 UI
+  showInRoomUI(roomId);
+  updateRoomLinkUI(url);
   
   log("✅ 加入房間: " + roomId);
 }
@@ -281,4 +268,82 @@ window.addEventListener("load", () => {
   if (roomParam) {
     joinRoom(roomParam);
   }
+});
+
+// ===== 聊天功能 =====
+document.getElementById("sendBtn").onclick = () => {
+  const input = document.getElementById("chatInput");
+  const message = input.value.trim();
+  if (!message) return;
+  
+  // 顯示發送的訊息
+  const chatMessages = document.getElementById("chatMessages");
+  const messageDiv = document.createElement("div");
+  messageDiv.className = "message sent";
+  messageDiv.innerHTML = `<div class="message-sender">我</div><div>${message}</div>`;
+  chatMessages.appendChild(messageDiv);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  
+  input.value = "";
+  log("💬 發送訊息: " + message);
+};
+
+// ===== 螢幕分享功能 =====
+let screenStream = null;
+
+document.getElementById("startScreenBtn").onclick = async () => {
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+      video: true,
+      audio: false 
+    });
+    
+    const video = document.getElementById("screenVideo");
+    video.srcObject = screenStream;
+    video.style.display = "block";
+    
+    document.getElementById("videoPlaceholder").style.display = "none";
+    document.getElementById("startScreenBtn").classList.add("hidden");
+    document.getElementById("stopScreenBtn").classList.remove("hidden");
+    
+    log("🎬 開始分享螢幕");
+    
+    // 監聽使用者停止分享
+    screenStream.getVideoTracks()[0].onended = () => {
+      stopScreenShare();
+    };
+  } catch (err) {
+    log("❌ 無法分享螢幕: " + err.message);
+  }
+};
+
+document.getElementById("stopScreenBtn").onclick = () => {
+  stopScreenShare();
+};
+
+function stopScreenShare() {
+  if (screenStream) {
+    screenStream.getTracks().forEach(track => track.stop());
+    screenStream = null;
+  }
+  
+  const video = document.getElementById("screenVideo");
+  video.srcObject = null;
+  video.style.display = "none";
+  
+  document.getElementById("videoPlaceholder").style.display = "block";
+  document.getElementById("startScreenBtn").classList.remove("hidden");
+  document.getElementById("stopScreenBtn").classList.add("hidden");
+  
+  log("⏹️ 停止分享螢幕");
+}
+
+// ===== 遊戲選擇 =====
+document.querySelectorAll('.game-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const game = card.dataset.game;
+    const gameName = card.querySelector('.game-title').textContent;
+    log(`🎮 選擇遊戲: ${gameName}`);
+    alert(`即將開始 ${gameName}！\n(遊戲功能開發中...)`);
+  });
 });
