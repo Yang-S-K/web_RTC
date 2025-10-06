@@ -1,14 +1,10 @@
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-<script type="module" src="app.js"></script>
-
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, set, get, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAg9yuhB3c5s4JqQ_sW7iTVAr3faI3pdd8",
   authDomain: "web-rtc-1f615.firebaseapp.com",
-  databaseURL: "https://web-rtc-1f615-default-rtdb.asia-southeast1.firebasedatabase.app", // ✅ 保留一次
+  databaseURL: "https://web-rtc-1f615-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "web-rtc-1f615",
   storageBucket: "web-rtc-1f615.appspot.com",
   messagingSenderId: "369978320587",
@@ -30,7 +26,7 @@ function showInRoomUI(roomId) {
   document.getElementById("leaveSection").style.display = "block";
 
   document.getElementById("roomIdDisplay").textContent = "房號: " + roomId;
-  document.getElementById("qrcode").style.display = "block"; // 顯示 QRCode
+  document.getElementById("qrcode").style.display = "block"; 
 }
 
 function resetUI() {
@@ -40,9 +36,8 @@ function resetUI() {
 
   document.getElementById("roomIdDisplay").textContent = "";
   document.getElementById("qrcode").innerHTML = "";
-  document.getElementById("qrcode").style.display = "none"; // 隱藏 QRCode
+  document.getElementById("qrcode").style.display = "none";
 }
-
 
 // ===== 開房 =====
 document.getElementById("createRoomBtn").onclick = async () => {
@@ -51,20 +46,22 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
   pc = new RTCPeerConnection();
 
-  // 建立 Offer
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   await set(ref(db, "rooms/" + currentRoomId), { offer });
 
-  // ✅ 產生 QR Code
-  QRCode.toCanvas(
-    document.getElementById("qrcode"),
-    window.location.origin + window.location.pathname + "?room=" + currentRoomId
-  );
+  // ✅ 檢查 currentRoomId 是否存在
+  if (currentRoomId) {
+    QRCode.toCanvas(
+      document.getElementById("qrcode"),
+      `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`
+    );
+  } else {
+    log("❌ 房號生成失敗，無法產生 QR Code");
+  }
 
   log("建立房間: " + currentRoomId);
 };
-
 
 // ===== 加入房間 =====
 document.getElementById("joinRoomBtn").onclick = async () => {
@@ -97,7 +94,6 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
   }
 
   if (currentRoomId) {
-    // ⚠️ 開房的人可以選擇刪掉房間資料
     await remove(ref(db, "rooms/" + currentRoomId));
     log("已離開房間: " + currentRoomId);
     currentRoomId = null;
