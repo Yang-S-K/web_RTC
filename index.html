@@ -237,14 +237,48 @@
       margin-bottom: 5px;
     }
 
+    .message-image {
+      max-width: 300px;
+      max-height: 300px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 0.3s ease;
+      margin-top: 8px;
+      display: block;
+    }
+
+    .message-image:hover {
+      transform: scale(1.05);
+    }
+
     .chat-input-area {
       display: flex;
       gap: 10px;
+      align-items: center;
     }
 
-    .chat-input-area input {
+    .chat-input-area input[type="text"] {
       flex: 1;
       border-radius: 20px;
+    }
+
+    .image-btn {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 50%;
+      background: #f0f0f0;
+      cursor: pointer;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+
+    .image-btn:hover {
+      background: #e0e0e0;
+      transform: scale(1.1);
     }
 
     /* 檔案傳輸 */
@@ -509,6 +543,42 @@
       font-weight: bold;
     }
 
+    .member-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .action-btn {
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .transfer-btn {
+      background: #ffd700;
+    }
+
+    .transfer-btn:hover {
+      background: #ffed4e;
+      transform: scale(1.1);
+    }
+
+    .kick-btn {
+      background: #ff6b6b;
+    }
+
+    .kick-btn:hover {
+      background: #ff5252;
+      transform: scale(1.1);
+    }
+
     .edit-name-section {
       margin-top: 20px;
       padding-top: 20px;
@@ -550,51 +620,7 @@
       max-height: 200px;
       overflow-y: auto;
     }
-  .chat-input-area {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }
 
-    .chat-input-area input[type="text"] {
-      flex: 1;
-      border-radius: 20px;
-    }
-
-    .image-btn {
-      width: 44px;
-      height: 44px;
-      border: none;
-      border-radius: 50%;
-      background: #f0f0f0;
-      cursor: pointer;
-      font-size: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.3s ease;
-    }
-
-    .image-btn:hover {
-      background: #e0e0e0;
-      transform: scale(1.1);
-    }
-
-    .message-image-container {
-      margin-top: 5px;
-    }
-
-    .message-image {
-      max-width: 300px;
-      max-height: 300px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: transform 0.3s ease;
-    }
-
-    .message-image:hover {
-      transform: scale(1.05);
-    }
     @media (max-width: 768px) {
       .main-content {
         grid-template-columns: 1fr;
@@ -611,50 +637,6 @@
         width: auto;
         padding: 12px 20px;
       }
-    }
-    .you-badge {
-      background: #667eea;
-      color: white;
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: bold;
-    }
-
-    .member-actions {
-      display: flex;
-      gap: 8px;
-    }
-
-    .action-btn {
-      width: 36px;
-      height: 36px;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .transfer-btn {
-      background: #ffd700;
-    }
-
-    .transfer-btn:hover {
-      background: #ffed4e;
-      transform: scale(1.1);
-    }
-
-    .kick-btn {
-      background: #ff6b6b;
-    }
-
-    .kick-btn:hover {
-      background: #ff5252;
-      transform: scale(1.1);
     }
   </style>
 </head>
@@ -726,6 +708,8 @@
               </div>
             </div>
             <div class="chat-input-area">
+              <button class="image-btn" id="imageBtn" title="傳送圖片">📷</button>
+              <input type="file" id="imageInput" accept="image/*" style="display: none;">
               <input type="text" id="chatInput" placeholder="輸入訊息...">
               <button class="btn btn-primary" id="sendBtn">發送</button>
             </div>
@@ -857,7 +841,3 @@
   <script type="module" src="app.js"></script>
 </body>
 </html>
-
-
-
-
