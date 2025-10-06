@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>WebRTC Chat Demo with QRCode</title>
-  <!-- Firebase -->
+  <!-- Firebase v8 -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
   <!-- QR Code Library -->
@@ -20,7 +20,6 @@
   <h2>WebRTC Chat Demo</h2>
 
   <button onclick="createRoom()">開房</button>
-  <button onclick="joinRoom()">加入</button>
   <br><br>
   <label>房號：</label><input id="roomId" type="text" readonly>
   <div id="status">尚未建立房間</div>
@@ -32,15 +31,16 @@
   <input id="msg" type="text"><button onclick="sendMsg()">送出</button>
 
 <script>
-  // === Firebase 設定（請換成你自己的專案） ===
-    const firebaseConfig = {
-    apiKey: "AIzaSyAg9yuhB3c5s4Jq0_sW7iTVAr3fal3pdd8",
+  // === Firebase 設定（已加上 databaseURL） ===
+  const firebaseConfig = {
+    apiKey: "AIzaSyAg9yuhB3c5s4JqQ_sW7iTVAr3faI3pdd8",
     authDomain: "web-rtc-1f615.firebaseapp.com",
+    databaseURL: "https://web-rtc-1f615-default-rtdb.firebaseio.com",
     projectId: "web-rtc-1f615",
-    storageBucket: "web-rtc-1f615.firebasestorage.app",
-    messagingSenderId: "360978320587",
-    appId: "1:360978320587:web:8f1bf80a69c19e21051f4e"
-    };
+    storageBucket: "web-rtc-1f615.appspot.com",
+    messagingSenderId: "369978320587",
+    appId: "1:369978320587:web:8f1bf80a69c19e21051f4e"
+  };
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 
@@ -105,10 +105,8 @@
     });
   }
 
-  async function joinRoom() {
-    const roomId = document.getElementById('roomId').value;
-    if (!roomId) return alert("請先輸入或用 QR Code 連結帶入房號");
-
+  async function joinRoom(roomId) {
+    if (!roomId) return alert("房號不存在");
     roomRef = db.ref("rooms/"+roomId);
     pc = new RTCPeerConnection(servers);
 
@@ -164,7 +162,7 @@
     const roomId = urlParams.get("room");
     if (roomId) {
       document.getElementById("roomId").value = roomId;
-      joinRoom(); // 自動加入
+      joinRoom(roomId); // 自動加入
     }
   };
 </script>
