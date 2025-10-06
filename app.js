@@ -69,7 +69,6 @@ function resetUI() {
 }
 
 // ===== 成員列表功能 =====
-// ===== 成員列表功能 =====
 function showMemberList() {
   const modal = document.getElementById("memberModal");
   const memberList = document.getElementById("memberList");
