@@ -16,9 +16,11 @@ const db = getDatabase(app);
 let pc;
 let currentRoomId = null;
 let currentUserId = Math.random().toString(36).substring(2, 10);
+let currentUserName = "使用者" + currentUserId.substring(0, 4);
 let peerConnections = {};
 let membersListener = null;
 let hostListener = null;
+let currentMembers = {};
 
 const log = (msg) => {
   const logEl = document.getElementById("log");
@@ -28,18 +30,11 @@ const log = (msg) => {
 
 // ===== UI 控制 =====
 function showInRoomUI(roomId) {
-  // 隱藏大廳的開房/加入按鈕
   document.getElementById("createSection").style.display = "none";
   document.getElementById("joinSection").style.display = "none";
-  
-  // 顯示房間資訊和主要內容
   document.getElementById("roomInfo").classList.remove("hidden");
   document.getElementById("mainContent").classList.remove("hidden");
-  
-  // 更新房號顯示
   document.getElementById("roomIdDisplay").textContent = "房號: " + roomId;
-  
-  // 顯示 QR Section（在大廳區域）
   document.getElementById("qrSection").style.display = "flex";
 }
 
@@ -59,25 +54,125 @@ function updateRoomLinkUI(url) {
 }
 
 function resetUI() {
-  // 顯示大廳的開房/加入按鈕
   document.getElementById("createSection").style.display = "block";
   document.getElementById("joinSection").style.display = "block";
-  
-  // 隱藏房間資訊和主要內容
   document.getElementById("roomInfo").classList.add("hidden");
   document.getElementById("mainContent").classList.add("hidden");
   document.getElementById("qrSection").style.display = "none";
-  
-  // 清空房號
   document.getElementById("roomIdDisplay").textContent = "";
   
-  // 清除 QR Code
   const canvas = document.getElementById("qrcode");
   const context = canvas.getContext("2d");
   if (context) {
     context.clearRect(0, 0, canvas.width, canvas.height);
   }
 }
+
+// ===== 成員列表功能 =====
+function showMemberList() {
+  const modal = document.getElementById("memberModal");
+  const memberList = document.getElementById("memberList");
+  
+  memberList.innerHTML = "";
+  
+  // 取得房間資訊以確定 Host
+  get(ref(db, "rooms/" + currentRoomId)).then(snapshot => {
+    const roomData = snapshot.val();
+    const hostId = roomData?.hostId;
+    
+    // 排序成員：Host 第一，其他按加入時間
+    const sortedMembers = Object.entries(currentMembers).sort(([idA, dataA], [idB, dataB]) => {
+      if (idA === hostId) return -1;
+      if (idB === hostId) return 1;
+      return dataA.joinedAt - dataB.joinedAt;
+    });
+    
+    sortedMembers.forEach(([memberId, memberData]) => {
+      const memberItem = document.createElement("div");
+      memberItem.className = "member-item";
+      
+      const isMe = memberId === currentUserId;
+      const isHost = memberId === hostId;
+      const name = memberData.name || "使用者" + memberId.substring(0, 4);
+      const initial = name.charAt(0).toUpperCase();
+      
+      memberItem.innerHTML = `
+        <div class="member-info">
+          <div class="member-avatar">${initial}</div>
+          <span class="member-name">${name}</span>
+        </div>
+        <div>
+          ${isHost ? '<span class="member-badge">👑 房主</span>' : ''}
+          ${isMe ? '<span class="you-badge">我</span>' : ''}
+        </div>
+      `;
+      
+      memberList.appendChild(memberItem);
+    });
+  });
+  
+  modal.classList.remove("hidden");
+}
+
+function hideMemberList() {
+  document.getElementById("memberModal").classList.add("hidden");
+}
+
+// 點擊成員計數顯示列表
+document.getElementById("memberCount").onclick = () => {
+  showMemberList();
+};
+
+// 關閉彈窗
+document.getElementById("closeMemberModal").onclick = () => {
+  hideMemberList();
+};
+
+// 點擊遮罩關閉
+document.getElementById("memberModal").onclick = (e) => {
+  if (e.target.id === "memberModal") {
+    hideMemberList();
+  }
+};
+
+// 更新名稱
+document.getElementById("updateNameBtn").onclick = async () => {
+  const newName = document.getElementById("newNameInput").value.trim();
+  
+  if (!newName) {
+    alert("請輸入名稱");
+    return;
+  }
+  
+  if (newName.length > 20) {
+    alert("名稱不能超過 20 個字");
+    return;
+  }
+  
+  if (!currentRoomId) return;
+  
+  try {
+    await update(ref(db, "rooms/" + currentRoomId + "/members/" + currentUserId), {
+      name: newName
+    });
+    
+    currentUserName = newName;
+    document.getElementById("newNameInput").value = "";
+    log("✅ 名稱已更新為: " + newName);
+    
+    // 重新載入成員列表
+    showMemberList();
+  } catch (err) {
+    log("❌ 更新名稱失敗: " + err.message);
+  }
+};
+
+// Enter 快速更新名稱
+document.getElementById("newNameInput").addEventListener("keypress", (e) => {
+  if (e.key === "Enter") {
+    document.getElementById("updateNameBtn").click();
+  }
+});
 
 // ===== 開房 =====
 document.getElementById("createRoomBtn").onclick = async () => {
@@ -89,18 +184,19 @@ document.getElementById("createRoomBtn").onclick = async () => {
     members: {
       [currentUserId]: {
         joinedAt: Date.now(),
-        isHost: true
+        isHost: true,
+        name: currentUserName
       }
     }
   };
 
   await set(ref(db, "rooms/" + currentRoomId), roomData);
 
-  // 監聽房間成員變化
   let lastMemberCount = 1;
   membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
     const members = snapshot.val();
     if (members) {
+      currentMembers = members;
       const memberCount = Object.keys(members).length;
       updateMemberCount(memberCount);
       
@@ -113,7 +209,6 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
   const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
   
-  // 更新 UI
   showInRoomUI(currentRoomId);
   updateRoomLinkUI(url);
 
@@ -168,17 +263,17 @@ async function joinRoom(roomId) {
 
   currentRoomId = roomId;
 
-  // 加入成員列表
   await set(ref(db, "rooms/" + roomId + "/members/" + currentUserId), {
     joinedAt: Date.now(),
-    isHost: false
+    isHost: false,
+    name: currentUserName
   });
 
-  // 監聽房間成員變化
   let lastMemberCount = 0;
   membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
     const members = snapshot.val();
     if (members) {
+      currentMembers = members;
       const memberCount = Object.keys(members).length;
       updateMemberCount(memberCount);
       
@@ -189,7 +284,6 @@ async function joinRoom(roomId) {
     }
   });
 
-  // 監聽 Host 變化
   let lastHostId = null;
   hostListener = onValue(ref(db, "rooms/" + currentRoomId + "/hostId"), (snapshot) => {
     const hostId = snapshot.val();
@@ -203,7 +297,6 @@ async function joinRoom(roomId) {
 
   const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
   
-  // 更新 UI
   showInRoomUI(roomId);
   updateRoomLinkUI(url);
   
@@ -220,13 +313,11 @@ document.getElementById("joinRoomBtn").onclick = async () => {
 document.getElementById("leaveRoomBtn").onclick = async () => {
   if (!currentRoomId) return;
 
-  // 移除監聽器
   if (membersListener) membersListener();
   if (hostListener) hostListener();
   membersListener = null;
   hostListener = null;
 
-  // 關閉所有 PeerConnection
   Object.values(peerConnections).forEach(pc => pc.close());
   peerConnections = {};
 
@@ -237,10 +328,8 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
     const roomData = snap.val();
     const members = roomData.members || {};
     
-    // 移除自己
     await remove(ref(db, "rooms/" + currentRoomId + "/members/" + currentUserId));
 
-    // 如果是 Host 且房間還有其他人，交接 Host
     if (roomData.hostId === currentUserId) {
       const remainingMembers = Object.entries(members)
         .filter(([id]) => id !== currentUserId)
@@ -260,6 +349,7 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
 
   log("👋 已離開房間: " + currentRoomId);
   currentRoomId = null;
+  currentMembers = {};
   resetUI();
 };
 
@@ -278,7 +368,6 @@ document.getElementById("sendBtn").onclick = () => {
   const message = input.value.trim();
   if (!message) return;
   
-  // 顯示發送的訊息
   const chatMessages = document.getElementById("chatMessages");
   const messageDiv = document.createElement("div");
   messageDiv.className = "message sent";
@@ -310,7 +399,6 @@ document.getElementById("startScreenBtn").onclick = async () => {
     
     log("🎬 開始分享螢幕");
     
-    // 監聽使用者停止分享
     screenStream.getVideoTracks()[0].onended = () => {
       stopScreenShare();
     };
