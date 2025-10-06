@@ -35,6 +35,16 @@ function showInRoomUI(roomId, showQR) {
   document.getElementById("roomIdDisplay").textContent = "房號: " + roomId;
   document.getElementById("qrcode").style.display = showQR ? "block" : "none";
 }
+function setShareButton(url) {
+  const shareBtn = document.getElementById("shareBtn");
+  if (url) {
+    shareBtn.style.display = "inline-block";
+    shareBtn.onclick = () => shareRoom(url);
+  } else {
+    shareBtn.style.display = "none";
+    shareBtn.onclick = null;
+  }
+}
 
 function resetUI() {
   document.getElementById("createSection").style.display = "block";
@@ -44,6 +54,7 @@ function resetUI() {
   document.getElementById("roomIdDisplay").textContent = "";
   document.getElementById("qrcode").style.display = "none";
   document.getElementById("qrcode").getContext("2d").clearRect(0,0,200,200);
+  setShareButton(null);
 }
 
 // ===== 開房 (改良版) =====
@@ -93,7 +104,8 @@ document.getElementById("createRoomBtn").onclick = async () => {
   const shareBtn = document.getElementById("shareBtn");
   shareBtn.style.display = "inline-block";
   shareBtn.onclick = () => shareRoom(url);
-
+  setShareButton(url);
+  
   log("🎯 你是 Host");
   log("✅ 建立房間: " + currentRoomId);
 };
@@ -176,6 +188,8 @@ async function joinRoom(roomId) {
   });
 
   showInRoomUI(roomId, false);
+  const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+  setShareButton(url);
   log("✅ 加入房間: " + roomId);
 }
 
