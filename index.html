@@ -1,30 +1,29 @@
 <body>
-  <h2>WebRTC Demo</h2>
-
-  <!-- 開房 -->
   <div id="createSection">
     <button id="createRoomBtn">開房</button>
   </div>
 
-  <!-- 加入房間 -->
   <div id="joinSection">
     <input type="text" id="joinRoomId" placeholder="輸入房號">
     <button id="joinRoomBtn">加入房間</button>
   </div>
 
-  <!-- 房號顯示與 QRCode -->
   <p id="roomIdDisplay"></p>
   <div id="qrcode"></div>
 
-  <!-- 離開房間 -->
   <div id="leaveSection" style="display:none;">
     <button id="leaveRoomBtn">離開房間</button>
   </div>
 
   <pre id="log"></pre>
 
+  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js"></script>
+
+  <!-- QRCode 套件 -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
+  <!-- 你的程式 -->
   <script type="module" src="app.js"></script>
 </body>
