@@ -57,12 +57,12 @@ document.getElementById("createRoomBtn").onclick = async () => {
     document.getElementById("qrcode"),
     url,
     (err) => {
-      if (err) console.error("❌ QR Code 生成失敗:", err);
-      else log("✅ QR Code 已生成: " + url);
+      // if (err) console.error("❌ QR Code 生成失敗:", err);
+      // else log("✅ QR Code 已生成: " + url);
     }
   );
 
-  log("建立房間: " + currentRoomId);
+  // log("建立房間: " + currentRoomId);
 };
 
 // ===== 加入房間 =====
