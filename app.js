@@ -24,15 +24,21 @@ function showInRoomUI(roomId) {
   document.getElementById("createSection").style.display = "none";
   document.getElementById("joinSection").style.display = "none";
   document.getElementById("leaveSection").style.display = "block";
+
   document.getElementById("roomIdDisplay").textContent = "房號: " + roomId;
+  document.getElementById("qrcode").style.display = "block"; // 顯示 QRCode
 }
+
 function resetUI() {
   document.getElementById("createSection").style.display = "block";
   document.getElementById("joinSection").style.display = "block";
   document.getElementById("leaveSection").style.display = "none";
+
   document.getElementById("roomIdDisplay").textContent = "";
   document.getElementById("qrcode").innerHTML = "";
+  document.getElementById("qrcode").style.display = "none"; // 隱藏 QRCode
 }
+
 
 // ===== 開房 =====
 document.getElementById("createRoomBtn").onclick = async () => {
@@ -46,12 +52,15 @@ document.getElementById("createRoomBtn").onclick = async () => {
   await pc.setLocalDescription(offer);
   await set(ref(db, "rooms/" + currentRoomId), { offer });
 
-  // 產生 QR Code
-  QRCode.toCanvas(document.getElementById("qrcode"),
-    window.location.href + "?room=" + currentRoomId);
+  // ✅ 產生 QR Code
+  QRCode.toCanvas(
+    document.getElementById("qrcode"),
+    window.location.origin + window.location.pathname + "?room=" + currentRoomId
+  );
 
   log("建立房間: " + currentRoomId);
 };
+
 
 // ===== 加入房間 =====
 document.getElementById("joinRoomBtn").onclick = async () => {
