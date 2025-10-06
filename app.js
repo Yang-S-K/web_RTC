@@ -646,6 +646,7 @@ async function sendMessage(text) {
     userId: currentUserId,
     userName: currentUserName,
     text: text.trim(),
+    type: 'text',
     timestamp: serverTimestamp() // 使用 Firebase 伺服器時間
   };
   
@@ -657,6 +658,53 @@ async function sendMessage(text) {
     log("💬 訊息已發送");
   } catch (err) {
     log("❌ 發送訊息失敗: " + err.message);
+  }
+}
+
+// 發送圖片
+async function sendImage(file) {
+  if (!currentRoomId || !file) return;
+  
+  // 檢查檔案類型
+  if (!file.type.startsWith('image/')) {
+    log("❌ 只能傳送圖片檔案");
+    return;
+  }
+  
+  // 檢查檔案大小 (限制 5MB)
+  if (file.size > 5 * 1024 * 1024) {
+    log("❌ 圖片大小不能超過 5MB");
+    alert("圖片大小不能超過 5MB");
+    return;
+  }
+  
+  try {
+    log("📤 正在上傳圖片...");
+    
+    // 上傳到 Firebase Storage
+    const fileName = `${currentRoomId}/${currentUserId}_${Date.now()}_${file.name}`;
+    const imageRef = storageRef(storage, `chat-images/${fileName}`);
+    await uploadBytes(imageRef, file);
+    
+    // 獲取下載 URL
+    const imageUrl = await getDownloadURL(imageRef);
+    
+    // 儲存訊息到資料庫
+    const messageData = {
+      userId: currentUserId,
+      userName: currentUserName,
+      type: 'image',
+      imageUrl: imageUrl,
+      timestamp: serverTimestamp()
+    };
+    
+    const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + currentUserId + "_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7));
+    await set(newMessageRef, messageData);
+    
+    log("✅ 圖片已發送");
+  } catch (err) {
+    log("❌ 上傳圖片失敗: " + err.message);
+    alert("上傳圖片失敗，請稍後再試");
   }
 }
 
