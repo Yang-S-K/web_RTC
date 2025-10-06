@@ -1,5 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, set, get, remove, onValue, update, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
 const firebaseConfig = {
   apiKey: "AIzaSyAg9yuhB3c5s4JqQ_sW7iTVAr3faI3pdd8",
   authDomain: "web-rtc-1f615.firebaseapp.com",
@@ -9,23 +10,37 @@ const firebaseConfig = {
   messagingSenderId: "369978320587",
   appId: "1:369978320587:web:8f1bf80a69c19e21051f4e"
 };
+
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-let pc;
 let currentRoomId = null;
 let currentUserId = Math.random().toString(36).substring(2, 10);
 let currentUserName = "使用者" + currentUserId.substring(0, 4);
 let peerConnections = {};
+let dataChannels = {};
 let membersListener = null;
 let hostListener = null;
 let currentMembers = {};
 let messagesListener = null;
+let screenStream = null;
+
+// 檔案傳輸相關
+let fileTransfers = {}; // { transferId: { file, chunks, received, ... } }
+const CHUNK_SIZE = 16384; // 16KB chunks
 
 const log = (msg) => {
   const logEl = document.getElementById("log");
   logEl.textContent = msg;
   console.log(msg);
+};
+
+// ===== WebRTC 配置 =====
+const configuration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ]
 };
 
 // ===== UI 控制 =====
@@ -70,7 +85,6 @@ function resetUI() {
 
 // ===== 處理被踢出房間 =====
 function handleKickedOut() {
-  // 關閉所有監聽器
   if (membersListener) {
     membersListener();
     membersListener = null;
@@ -84,29 +98,341 @@ function handleKickedOut() {
     messagesListener = null;
   }
 
-  // 關閉所有連接
   Object.values(peerConnections).forEach(pc => pc.close());
   peerConnections = {};
+  dataChannels = {};
 
-  // 停止螢幕分享
   if (screenStream) {
     stopScreenShare();
   }
 
-  // 重置狀態
   const roomId = currentRoomId;
   currentRoomId = null;
   currentMembers = {};
   
-  // 清空聊天記錄
   clearChatMessages();
-  
-  // 重置 UI
   resetUI();
   
-  // 顯示提示
   log("🚫 您已被移出房間: " + roomId);
   alert("您已被移出房間");
+}
+
+// ===== WebRTC 連接管理 =====
+async function createPeerConnection(peerId, isInitiator) {
+  const pc = new RTCPeerConnection(configuration);
+  peerConnections[peerId] = pc;
+
+  // 創建 DataChannel
+  if (isInitiator) {
+    const channel = pc.createDataChannel("fileTransfer");
+    setupDataChannel(channel, peerId);
+    dataChannels[peerId] = channel;
+    log(`📡 創建 DataChannel 給 ${peerId}`);
+  } else {
+    pc.ondatachannel = (event) => {
+      const channel = event.channel;
+      setupDataChannel(channel, peerId);
+      dataChannels[peerId] = channel;
+      log(`📡 接收 DataChannel 從 ${peerId}`);
+    };
+  }
+
+  // ICE 候選
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/candidate`), {
+        candidate: event.candidate.toJSON(),
+        timestamp: Date.now()
+      });
+    }
+  };
+
+  // 連接狀態監控
+  pc.onconnectionstatechange = () => {
+    log(`🔗 與 ${peerId} 的連接狀態: ${pc.connectionState}`);
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      pc.close();
+      delete peerConnections[peerId];
+      delete dataChannels[peerId];
+    }
+  };
+
+  // 監聽來自對方的信號
+  onValue(ref(db, `rooms/${currentRoomId}/signals/${peerId}_to_${currentUserId}`), async (snapshot) => {
+    const signal = snapshot.val();
+    if (!signal) return;
+
+    try {
+      if (signal.offer && pc.signalingState === 'stable') {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), {
+          answer: answer.toJSON(),
+          timestamp: Date.now()
+        });
+      } else if (signal.answer && pc.signalingState === 'have-local-offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+      }
+
+      if (signal.candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      }
+    } catch (err) {
+      console.error('信號處理錯誤:', err);
+    }
+  });
+
+  // 如果是發起者，創建 offer
+  if (isInitiator) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/offer`), {
+      offer: offer.toJSON(),
+      timestamp: Date.now()
+    });
+  }
+
+  return pc;
+}
+
+// ===== DataChannel 設置 =====
+function setupDataChannel(channel, peerId) {
+  channel.binaryType = 'arraybuffer';
+
+  channel.onopen = () => {
+    log(`✅ DataChannel 已連接: ${peerId}`);
+  };
+
+  channel.onclose = () => {
+    log(`❌ DataChannel 已關閉: ${peerId}`);
+  };
+
+  channel.onerror = (error) => {
+    log(`❌ DataChannel 錯誤: ${error}`);
+  };
+
+  channel.onmessage = (event) => {
+    handleDataChannelMessage(event.data, peerId);
+  };
+}
+
+// ===== 檔案傳輸處理 =====
+function handleDataChannelMessage(data, peerId) {
+  if (typeof data === 'string') {
+    const message = JSON.parse(data);
+    
+    if (message.type === 'file-meta') {
+      // 接收檔案元數據
+      const transferId = message.transferId;
+      fileTransfers[transferId] = {
+        fileName: message.fileName,
+        fileSize: message.fileSize,
+        fileType: message.fileType,
+        chunks: [],
+        receivedSize: 0,
+        totalChunks: message.totalChunks,
+        senderId: peerId,
+        senderName: currentMembers[peerId]?.name || "使用者"
+      };
+      
+      addFileToList(transferId, message.fileName, message.fileSize, peerId, false);
+      log(`📥 準備接收檔案: ${message.fileName} (${formatFileSize(message.fileSize)})`);
+    } else if (message.type === 'file-chunk-ack') {
+      // 收到確認，繼續發送下一個chunk
+      const transfer = fileTransfers[message.transferId];
+      if (transfer && transfer.isSending) {
+        sendNextChunk(message.transferId, peerId);
+      }
+    }
+  } else {
+    // 接收檔案數據塊
+    handleFileChunk(data, peerId);
+  }
+}
+
+function handleFileChunk(arrayBuffer, peerId) {
+  // 從數據中提取 transferId (前36字節)
+  const transferIdBuffer = arrayBuffer.slice(0, 36);
+  const transferId = new TextDecoder().decode(transferIdBuffer);
+  const chunkData = arrayBuffer.slice(36);
+  
+  const transfer = fileTransfers[transferId];
+  if (!transfer) return;
+
+  transfer.chunks.push(chunkData);
+  transfer.receivedSize += chunkData.byteLength;
+
+  // 更新進度
+  updateFileProgress(transferId, transfer.receivedSize, transfer.fileSize);
+
+  // 發送確認
+  const channel = dataChannels[peerId];
+  if (channel && channel.readyState === 'open') {
+    channel.send(JSON.stringify({
+      type: 'file-chunk-ack',
+      transferId: transferId
+    }));
+  }
+
+  // 檢查是否接收完成
+  if (transfer.receivedSize >= transfer.fileSize) {
+    completeFileReceive(transferId);
+  }
+}
+
+function completeFileReceive(transferId) {
+  const transfer = fileTransfers[transferId];
+  if (!transfer) return;
+
+  // 合併所有chunks
+  const blob = new Blob(transfer.chunks, { type: transfer.fileType });
+  
+  // 創建下載連結
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = transfer.fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  log(`✅ 檔案接收完成: ${transfer.fileName}`);
+  updateFileStatus(transferId, 'completed');
+}
+
+// ===== 檔案發送 =====
+async function sendFile(file) {
+  if (Object.keys(dataChannels).length === 0) {
+    alert('沒有可用的連接，請等待其他成員加入');
+    return;
+  }
+
+  const transferId = `${currentUserId}_${Date.now()}`;
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+  fileTransfers[transferId] = {
+    file: file,
+    fileName: file.name,
+    fileSize: file.size,
+    fileType: file.type,
+    totalChunks: totalChunks,
+    currentChunk: 0,
+    isSending: true
+  };
+
+  addFileToList(transferId, file.name, file.size, currentUserId, true);
+  log(`📤 開始發送檔案: ${file.name} (${formatFileSize(file.size)})`);
+
+  // 向所有連接的peers發送檔案元數據
+  for (const peerId in dataChannels) {
+    const channel = dataChannels[peerId];
+    if (channel && channel.readyState === 'open') {
+      channel.send(JSON.stringify({
+        type: 'file-meta',
+        transferId: transferId,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        totalChunks: totalChunks
+      }));
+
+      // 開始發送chunks
+      setTimeout(() => sendNextChunk(transferId, peerId), 100);
+    }
+  }
+}
+
+function sendNextChunk(transferId, peerId) {
+  const transfer = fileTransfers[transferId];
+  const channel = dataChannels[peerId];
+
+  if (!transfer || !channel || channel.readyState !== 'open') return;
+
+  if (transfer.currentChunk >= transfer.totalChunks) {
+    log(`✅ 檔案發送完成給 ${peerId}: ${transfer.fileName}`);
+    updateFileStatus(transferId, 'completed');
+    return;
+  }
+
+  const start = transfer.currentChunk * CHUNK_SIZE;
+  const end = Math.min(start + CHUNK_SIZE, transfer.fileSize);
+  const chunk = transfer.file.slice(start, end);
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    // 將 transferId 和數據打包
+    const transferIdBuffer = new TextEncoder().encode(transferId.padEnd(36, ' '));
+    const combinedBuffer = new Uint8Array(transferIdBuffer.length + e.target.result.byteLength);
+    combinedBuffer.set(new Uint8Array(transferIdBuffer), 0);
+    combinedBuffer.set(new Uint8Array(e.target.result), transferIdBuffer.length);
+
+    try {
+      channel.send(combinedBuffer.buffer);
+      transfer.currentChunk++;
+      
+      // 更新進度
+      updateFileProgress(transferId, transfer.currentChunk * CHUNK_SIZE, transfer.fileSize);
+    } catch (err) {
+      console.error('發送chunk失敗:', err);
+    }
+  };
+
+  reader.readAsArrayBuffer(chunk);
+}
+
+// ===== UI 檔案列表管理 =====
+function addFileToList(transferId, fileName, fileSize, userId, isSending) {
+  const fileList = document.getElementById('fileList');
+  const fileItem = document.createElement('div');
+  fileItem.className = 'file-item';
+  fileItem.id = `file-${transferId}`;
+
+  const userName = userId === currentUserId ? '我' : (currentMembers[userId]?.name || '使用者');
+  const direction = isSending ? '📤 發送中' : '📥 接收中';
+
+  fileItem.innerHTML = `
+    <div class="file-info">
+      <div style="font-size: 32px;">📄</div>
+      <div>
+        <div style="font-weight: bold; color: #333;">${fileName}</div>
+        <div style="font-size: 14px; color: #666;">${formatFileSize(fileSize)} · ${direction} · ${userName}</div>
+        <div class="file-progress">
+          <div class="file-progress-bar" id="progress-${transferId}" style="width: 0%"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  fileList.appendChild(fileItem);
+}
+
+function updateFileProgress(transferId, loaded, total) {
+  const progressBar = document.getElementById(`progress-${transferId}`);
+  if (progressBar) {
+    const percent = (loaded / total * 100).toFixed(1);
+    progressBar.style.width = percent + '%';
+  }
+}
+
+function updateFileStatus(transferId, status) {
+  const fileItem = document.getElementById(`file-${transferId}`);
+  if (fileItem) {
+    const statusText = status === 'completed' ? '✅ 完成' : '❌ 失敗';
+    const infoDiv = fileItem.querySelector('.file-info > div > div:nth-child(2)');
+    if (infoDiv) {
+      infoDiv.innerHTML = infoDiv.innerHTML.replace(/(📤 發送中|📥 接收中)/, statusText);
+    }
+  }
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }
 
 // ===== 成員列表功能 =====
@@ -116,13 +442,11 @@ function showMemberList() {
   
   memberList.innerHTML = "";
   
-  // 取得房間資訊以確定 Host
   get(ref(db, "rooms/" + currentRoomId)).then(snapshot => {
     const roomData = snapshot.val();
     const hostId = roomData?.hostId;
     const isCurrentUserHost = hostId === currentUserId;
     
-    // 排序成員：Host 第一，其他按加入時間
     const sortedMembers = Object.entries(currentMembers).sort(([idA, dataA], [idB, dataB]) => {
       if (idA === hostId) return -1;
       if (idB === hostId) return 1;
@@ -138,7 +462,6 @@ function showMemberList() {
       const name = memberData.name || "使用者" + memberId.substring(0, 4);
       const initial = name.charAt(0).toUpperCase();
       
-      // 房主操作按鈕（只有當前用戶是房主且目標不是自己時顯示）
       let actionButtons = '';
       if (isCurrentUserHost && !isMe) {
         actionButtons = `
@@ -168,7 +491,6 @@ function showMemberList() {
       memberList.appendChild(memberItem);
     });
     
-    // 綁定轉交房主事件
     document.querySelectorAll('.transfer-btn').forEach(btn => {
       btn.onclick = async () => {
         const memberId = btn.dataset.memberId;
@@ -180,7 +502,6 @@ function showMemberList() {
       };
     });
     
-    // 綁定踢除成員事件
     document.querySelectorAll('.kick-btn').forEach(btn => {
       btn.onclick = async () => {
         const memberId = btn.dataset.memberId;
@@ -196,7 +517,6 @@ function showMemberList() {
   modal.classList.remove("hidden");
 }
 
-// 轉交房主
 async function transferHost(newHostId) {
   if (!currentRoomId) return;
   
@@ -211,42 +531,29 @@ async function transferHost(newHostId) {
     
     const roomData = snapshot.val();
     
-    // 確認當前用戶是房主
     if (roomData.hostId !== currentUserId) {
       log("❌ 只有房主可以轉交房主權限");
       return;
     }
     
-    // 確認新房主在房間內
     if (!roomData.members || !roomData.members[newHostId]) {
       log("❌ 該成員不在房間內");
       return;
     }
     
-    // 更新房主
     await update(roomRef, { hostId: newHostId });
-    
-    // 更新舊房主狀態
-    await update(ref(db, `rooms/${currentRoomId}/members/${currentUserId}`), {
-      isHost: false
-    });
-    
-    // 更新新房主狀態
-    await update(ref(db, `rooms/${currentRoomId}/members/${newHostId}`), {
-      isHost: true
-    });
+    await update(ref(db, `rooms/${currentRoomId}/members/${currentUserId}`), { isHost: false });
+    await update(ref(db, `rooms/${currentRoomId}/members/${newHostId}`), { isHost: true });
     
     const newHostName = roomData.members[newHostId].name || "使用者" + newHostId.substring(0, 4);
     log(`👑 已將房主轉交給: ${newHostName}`);
     
-    // 重新載入成員列表
     showMemberList();
   } catch (err) {
     log("❌ 轉交房主失敗: " + err.message);
   }
 }
 
-// 踢除成員
 async function kickMember(memberId) {
   if (!currentRoomId) return;
   
@@ -261,31 +568,29 @@ async function kickMember(memberId) {
     
     const roomData = snapshot.val();
     
-    // 確認當前用戶是房主
     if (roomData.hostId !== currentUserId) {
       log("❌ 只有房主可以踢除成員");
       return;
     }
     
-    // 不能踢除自己
     if (memberId === currentUserId) {
       log("❌ 不能踢除自己");
       return;
     }
     
-    // 移除成員
     await remove(ref(db, `rooms/${currentRoomId}/members/${memberId}`));
     
-    // 關閉與該成員的連接
     if (peerConnections[memberId]) {
       peerConnections[memberId].close();
       delete peerConnections[memberId];
+    }
+    if (dataChannels[memberId]) {
+      delete dataChannels[memberId];
     }
     
     const memberName = roomData.members[memberId]?.name || "使用者" + memberId.substring(0, 4);
     log(`🚫 已踢除成員: ${memberName}`);
     
-    // 重新載入成員列表
     showMemberList();
   } catch (err) {
     log("❌ 踢除成員失敗: " + err.message);
@@ -296,61 +601,40 @@ function hideMemberList() {
   document.getElementById("memberModal").classList.add("hidden");
 }
 
-// 點擊成員計數顯示列表
-document.getElementById("memberCount").onclick = () => {
-  showMemberList();
-};
+// ===== 監聽成員變化並建立連接 =====
+function setupMemberConnections() {
+  onValue(ref(db, "rooms/" + currentRoomId + "/members"), async (snapshot) => {
+    const members = snapshot.val();
+    if (!members) return;
 
-// 關閉彈窗
-document.getElementById("closeMemberModal").onclick = () => {
-  hideMemberList();
-};
+    if (!members[currentUserId]) {
+      handleKickedOut();
+      return;
+    }
 
-// 點擊遮罩關閉
-document.getElementById("memberModal").onclick = (e) => {
-  if (e.target.id === "memberModal") {
-    hideMemberList();
-  }
-};
+    currentMembers = members;
+    const memberIds = Object.keys(members);
+    updateMemberCount(memberIds.length);
 
-// 更新名稱
-document.getElementById("updateNameBtn").onclick = async () => {
-  const newName = document.getElementById("newNameInput").value.trim();
-  
-  if (!newName) {
-    alert("請輸入名稱");
-    return;
-  }
-  
-  if (newName.length > 20) {
-    alert("名稱不能超過 20 個字");
-    return;
-  }
-  
-  if (!currentRoomId) return;
-  
-  try {
-    await update(ref(db, "rooms/" + currentRoomId + "/members/" + currentUserId), {
-      name: newName
-    });
-    
-    currentUserName = newName;
-    document.getElementById("newNameInput").value = "";
-    log("✅ 名稱已更新為: " + newName);
-    
-    // 重新載入成員列表
-    showMemberList();
-  } catch (err) {
-    log("❌ 更新名稱失敗: " + err.message);
-  }
-};
+    // 與新成員建立連接
+    for (const memberId of memberIds) {
+      if (memberId !== currentUserId && !peerConnections[memberId]) {
+        // 如果當前用戶ID較小，則作為發起者
+        const isInitiator = currentUserId < memberId;
+        await createPeerConnection(memberId, isInitiator);
+      }
+    }
 
-// Enter 快速更新名稱
-document.getElementById("newNameInput").addEventListener("keypress", (e) => {
-  if (e.key === "Enter") {
-    document.getElementById("updateNameBtn").click();
-  }
-});
+    // 清理已離開成員的連接
+    for (const peerId in peerConnections) {
+      if (!members[peerId]) {
+        peerConnections[peerId].close();
+        delete peerConnections[peerId];
+        delete dataChannels[peerId];
+      }
+    }
+  });
+}
 
 // ===== 開房 =====
 document.getElementById("createRoomBtn").onclick = async () => {
@@ -370,38 +654,12 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
   await set(ref(db, "rooms/" + currentRoomId), roomData);
 
-  let lastMemberCount = 1;
-  membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
-    const members = snapshot.val();
-    if (members) {
-      // 檢查自己是否還在成員列表中
-      if (!members[currentUserId]) {
-        log("🚫 您已被踢出房間");
-        handleKickedOut();
-        return;
-      }
-      
-      currentMembers = members;
-      const memberCount = Object.keys(members).length;
-      updateMemberCount(memberCount);
-      
-      if (memberCount !== lastMemberCount) {
-        log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
-        lastMemberCount = memberCount;
-      }
-    } else {
-      // 房間被刪除
-      log("🗑️ 房間已被刪除");
-      handleKickedOut();
-    }
-  });
+  setupMemberConnections();
 
   const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
   
   showInRoomUI(currentRoomId);
   updateRoomLinkUI(url);
-  
-  // 初始化聊天監聽
   initChatListener();
 
   log("🎯 你是 Host");
@@ -461,40 +719,12 @@ async function joinRoom(roomId) {
     name: currentUserName
   });
 
-  let lastMemberCount = 0;
-  membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
-    const members = snapshot.val();
-    if (members) {
-      // 檢查自己是否還在成員列表中
-      if (!members[currentUserId]) {
-        log("🚫 您已被踢出房間");
-        handleKickedOut();
-        return;
-      }
-      
-      currentMembers = members;
-      const memberCount = Object.keys(members).length;
-      updateMemberCount(memberCount);
-      
-      if (memberCount !== lastMemberCount) {
-        log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
-        lastMemberCount = memberCount;
-      }
-    } else {
-      // 房間被刪除
-      log("🗑️ 房間已被刪除");
-      handleKickedOut();
-    }
-  });
+  setupMemberConnections();
 
-  let lastHostId = null;
   hostListener = onValue(ref(db, "rooms/" + currentRoomId + "/hostId"), (snapshot) => {
     const hostId = snapshot.val();
-    if (hostId && hostId !== lastHostId) {
-      if (hostId === currentUserId) {
-        log("🎯 你成為新的 Host！");
-      }
-      lastHostId = hostId;
+    if (hostId === currentUserId) {
+      log("🎯 你成為新的 Host！");
     }
   });
 
@@ -502,8 +732,6 @@ async function joinRoom(roomId) {
   
   showInRoomUI(roomId);
   updateRoomLinkUI(url);
-  
-  // 初始化聊天監聽
   initChatListener();
   
   log("✅ 加入房間: " + roomId);
@@ -528,6 +756,7 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
 
   Object.values(peerConnections).forEach(pc => pc.close());
   peerConnections = {};
+  dataChannels = {};
 
   const roomRef = ref(db, "rooms/" + currentRoomId);
   const snap = await get(roomRef);
@@ -585,16 +814,13 @@ function clearChatMessages() {
 function initChatListener() {
   if (!currentRoomId) return;
   
-  // 清空現有訊息
   clearChatMessages();
   
-  // 監聽新訊息
   const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
   messagesListener = onValue(messagesRef, (snapshot) => {
     const messages = snapshot.val();
     
     if (messages) {
-      // 清空聊天區（保留系統訊息除外，或全部清空重新渲染）
       const chatMessages = document.getElementById("chatMessages");
       chatMessages.innerHTML = `
         <div class="message received">
@@ -603,10 +829,8 @@ function initChatListener() {
         </div>
       `;
       
-      // 按時間排序訊息
       const sortedMessages = Object.entries(messages).sort(([, a], [, b]) => a.timestamp - b.timestamp);
       
-      // 渲染所有訊息
       sortedMessages.forEach(([messageId, messageData]) => {
         displayMessage(messageData);
       });
@@ -645,7 +869,7 @@ async function sendMessage(text) {
     userId: currentUserId,
     userName: currentUserName,
     text: text.trim(),
-    timestamp: serverTimestamp() // 這樣就對了
+    timestamp: serverTimestamp()
   };
   
   try {
@@ -667,8 +891,6 @@ document.getElementById("sendBtn").onclick = () => {
 };
 
 // ===== 螢幕分享功能 =====
-let screenStream = null;
-
 document.getElementById("startScreenBtn").onclick = async () => {
   try {
     screenStream = await navigator.mediaDevices.getDisplayMedia({ 
@@ -714,6 +936,96 @@ function stopScreenShare() {
   
   log("⏹️ 停止分享螢幕");
 }
+
+// ===== 檔案選擇處理 =====
+const fileInput = document.getElementById('fileInput');
+const dropZone = document.getElementById('fileDropZone');
+
+fileInput.addEventListener('change', (e) => {
+  const files = e.target.files;
+  if (files.length > 0) {
+    Array.from(files).forEach(file => {
+      sendFile(file);
+    });
+  }
+  fileInput.value = ''; // 重置input
+});
+
+dropZone.addEventListener('click', () => {
+  fileInput.click();
+});
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragover');
+});
+
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  
+  const files = e.dataTransfer.files;
+  if (files.length > 0) {
+    Array.from(files).forEach(file => {
+      sendFile(file);
+    });
+  }
+});
+
+// ===== 成員相關事件 =====
+document.getElementById("memberCount").onclick = () => {
+  showMemberList();
+};
+
+document.getElementById("closeMemberModal").onclick = () => {
+  hideMemberList();
+};
+
+document.getElementById("memberModal").onclick = (e) => {
+  if (e.target.id === "memberModal") {
+    hideMemberList();
+  }
+};
+
+document.getElementById("updateNameBtn").onclick = async () => {
+  const newName = document.getElementById("newNameInput").value.trim();
+  
+  if (!newName) {
+    alert("請輸入名稱");
+    return;
+  }
+  
+  if (newName.length > 20) {
+    alert("名稱不能超過 20 個字");
+    return;
+  }
+  
+  if (!currentRoomId) return;
+  
+  try {
+    await update(ref(db, "rooms/" + currentRoomId + "/members/" + currentUserId), {
+      name: newName
+    });
+    
+    currentUserName = newName;
+    document.getElementById("newNameInput").value = "";
+    log("✅ 名稱已更新為: " + newName);
+    
+    showMemberList();
+  } catch (err) {
+    log("❌ 更新名稱失敗: " + err.message);
+  }
+};
+
+document.getElementById("newNameInput").addEventListener("keypress", (e) => {
+  if (e.key === "Enter") {
+    document.getElementById("updateNameBtn").click();
+  }
+});
 
 // ===== 遊戲選擇 =====
 document.querySelectorAll('.game-card').forEach(card => {
