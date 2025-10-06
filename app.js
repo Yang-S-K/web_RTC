@@ -140,10 +140,11 @@ async function createPeerConnection(peerId, isInitiator) {
   // ICE 候選
   pc.onicecandidate = (event) => {
     if (event.candidate) {
-      set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/candidate`), {
+      const candidateRef = ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/candidates/${Date.now()}`);
+      set(candidateRef, {
         candidate: event.candidate.toJSON(),
         timestamp: Date.now()
-      });
+      }).catch(err => console.error('發送 ICE candidate 失敗:', err));
     }
   };
 
@@ -158,12 +159,13 @@ async function createPeerConnection(peerId, isInitiator) {
   };
 
   // 監聽來自對方的信號
-  onValue(ref(db, `rooms/${currentRoomId}/signals/${peerId}_to_${currentUserId}`), async (snapshot) => {
+  const signalRef = ref(db, `rooms/${currentRoomId}/signals/${peerId}_to_${currentUserId}`);
+  onValue(signalRef, async (snapshot) => {
     const signal = snapshot.val();
     if (!signal) return;
 
     try {
-      if (signal.offer && pc.signalingState === 'stable') {
+      if (signal.offer && (!pc.currentRemoteDescription || pc.signalingState === 'stable')) {
         await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -171,26 +173,46 @@ async function createPeerConnection(peerId, isInitiator) {
           answer: answer.toJSON(),
           timestamp: Date.now()
         });
+        log(`📡 已回應 ${peerId} 的連接請求`);
       } else if (signal.answer && pc.signalingState === 'have-local-offer') {
         await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
-      }
-
-      if (signal.candidate) {
-        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        log(`✅ 已接收 ${peerId} 的回應`);
       }
     } catch (err) {
       console.error('信號處理錯誤:', err);
     }
   });
 
+  // 監聽 ICE candidates
+  const candidatesRef = ref(db, `rooms/${currentRoomId}/signals/${peerId}_to_${currentUserId}/candidates`);
+  onValue(candidatesRef, (snapshot) => {
+    const candidates = snapshot.val();
+    if (candidates) {
+      Object.values(candidates).forEach(async (data) => {
+        try {
+          if (data.candidate && pc.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          }
+        } catch (err) {
+          console.error('添加 ICE candidate 失敗:', err);
+        }
+      });
+    }
+  });
+
   // 如果是發起者，創建 offer
   if (isInitiator) {
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/offer`), {
-      offer: offer.toJSON(),
-      timestamp: Date.now()
-    });
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/offer`), {
+        offer: offer.toJSON(),
+        timestamp: Date.now()
+      });
+      log(`📡 已發送連接請求給 ${peerId}`);
+    } catch (err) {
+      console.error('創建 offer 失敗:', err);
+    }
   }
 
   return pc;
@@ -395,7 +417,7 @@ function addFileToList(transferId, fileName, fileSize, userId, isSending) {
   fileItem.innerHTML = `
     <div class="file-info">
       <div style="font-size: 32px;">📄</div>
-      <div>
+      <div style="flex: 1;">
         <div style="font-weight: bold; color: #333;">${fileName}</div>
         <div style="font-size: 14px; color: #666;">${formatFileSize(fileSize)} · ${direction} · ${userName}</div>
         <div class="file-progress">
@@ -403,9 +425,20 @@ function addFileToList(transferId, fileName, fileSize, userId, isSending) {
         </div>
       </div>
     </div>
+    ${isSending ? `<button class="btn btn-secondary" onclick="cancelFileTransfer('${transferId}')" style="padding: 8px 16px;">取消</button>` : ''}
   `;
 
   fileList.appendChild(fileItem);
+}
+
+// 取消檔案傳輸
+window.cancelFileTransfer = function(transferId) {
+  const transfer = fileTransfers[transferId];
+  if (transfer && transfer.isSending) {
+    transfer.isSending = false;
+    updateFileStatus(transferId, 'cancelled');
+    log(`❌ 已取消發送: ${transfer.fileName}`);
+  }
 }
 
 function updateFileProgress(transferId, loaded, total) {
