@@ -79,6 +79,8 @@ document.getElementById("createRoomBtn").onclick = async () => {
   });
 
   const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+  
+  // 生成 QR Code
   QRCode.toCanvas(
     document.getElementById("qrcode"),
     url,
@@ -87,9 +89,48 @@ document.getElementById("createRoomBtn").onclick = async () => {
     }
   );
 
+  // 設置分享按鈕
+  const shareBtn = document.getElementById("shareBtn");
+  shareBtn.style.display = "inline-block";
+  shareBtn.onclick = () => shareRoom(url);
+
   log("🎯 你是 Host");
   log("✅ 建立房間: " + currentRoomId);
 };
+
+// ===== 分享房間 =====
+async function shareRoom(url) {
+  // 如果瀏覽器支援 Web Share API
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'WebRTC 房間邀請',
+        text: '點擊連結加入房間',
+        url: url
+      });
+      log("✅ 分享成功");
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        log("❌ 分享失敗");
+      }
+    }
+  } else {
+    // 降級方案：複製到剪貼簿
+    try {
+      await navigator.clipboard.writeText(url);
+      log("✅ 連結已複製到剪貼簿");
+    } catch (err) {
+      // 再降級：選取文字讓用戶自己複製
+      const input = document.createElement("input");
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      log("✅ 連結已複製");
+    }
+  }
+}
 
 // ===== 加入房間 (改良版) =====
 async function joinRoom(roomId) {
