@@ -1,6 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, get, remove, onValue, update, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+import { getDatabase, ref, set, get, remove, onValue, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAg9yuhB3c5s4JqQ_sW7iTVAr3faI3pdd8",
@@ -13,7 +12,6 @@ const firebaseConfig = {
 };
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-const storage = getStorage(app);
 
 let pc;
 let currentRoomId = null;
@@ -73,6 +71,7 @@ function resetUI() {
 
 // ===== 處理被踢出房間 =====
 function handleKickedOut() {
+  // 關閉所有監聽器
   if (membersListener) {
     membersListener();
     membersListener = null;
@@ -86,20 +85,27 @@ function handleKickedOut() {
     messagesListener = null;
   }
 
+  // 關閉所有連接
   Object.values(peerConnections).forEach(pc => pc.close());
   peerConnections = {};
 
+  // 停止螢幕分享
   if (screenStream) {
     stopScreenShare();
   }
 
+  // 重置狀態
   const roomId = currentRoomId;
   currentRoomId = null;
   currentMembers = {};
   
+  // 清空聊天記錄
   clearChatMessages();
+  
+  // 重置 UI
   resetUI();
   
+  // 顯示提示
   log("🚫 您已被移出房間: " + roomId);
   alert("您已被移出房間");
 }
@@ -111,11 +117,13 @@ function showMemberList() {
   
   memberList.innerHTML = "";
   
+  // 取得房間資訊以確定 Host
   get(ref(db, "rooms/" + currentRoomId)).then(snapshot => {
     const roomData = snapshot.val();
     const hostId = roomData?.hostId;
     const isCurrentUserHost = hostId === currentUserId;
     
+    // 排序成員：Host 第一，其他按加入時間
     const sortedMembers = Object.entries(currentMembers).sort(([idA, dataA], [idB, dataB]) => {
       if (idA === hostId) return -1;
       if (idB === hostId) return 1;
@@ -131,6 +139,7 @@ function showMemberList() {
       const name = memberData.name || "使用者" + memberId.substring(0, 4);
       const initial = name.charAt(0).toUpperCase();
       
+      // 房主操作按鈕（只有當前用戶是房主且目標不是自己時顯示）
       let actionButtons = '';
       if (isCurrentUserHost && !isMe) {
         actionButtons = `
@@ -160,6 +169,7 @@ function showMemberList() {
       memberList.appendChild(memberItem);
     });
     
+    // 綁定轉交房主事件
     document.querySelectorAll('.transfer-btn').forEach(btn => {
       btn.onclick = async () => {
         const memberId = btn.dataset.memberId;
@@ -171,6 +181,7 @@ function showMemberList() {
       };
     });
     
+    // 綁定踢除成員事件
     document.querySelectorAll('.kick-btn').forEach(btn => {
       btn.onclick = async () => {
         const memberId = btn.dataset.memberId;
@@ -186,6 +197,7 @@ function showMemberList() {
   modal.classList.remove("hidden");
 }
 
+// 轉交房主
 async function transferHost(newHostId) {
   if (!currentRoomId) return;
   
@@ -200,22 +212,27 @@ async function transferHost(newHostId) {
     
     const roomData = snapshot.val();
     
+    // 確認當前用戶是房主
     if (roomData.hostId !== currentUserId) {
       log("❌ 只有房主可以轉交房主權限");
       return;
     }
     
+    // 確認新房主在房間內
     if (!roomData.members || !roomData.members[newHostId]) {
       log("❌ 該成員不在房間內");
       return;
     }
     
+    // 更新房主
     await update(roomRef, { hostId: newHostId });
     
+    // 更新舊房主狀態
     await update(ref(db, `rooms/${currentRoomId}/members/${currentUserId}`), {
       isHost: false
     });
     
+    // 更新新房主狀態
     await update(ref(db, `rooms/${currentRoomId}/members/${newHostId}`), {
       isHost: true
     });
@@ -223,12 +240,14 @@ async function transferHost(newHostId) {
     const newHostName = roomData.members[newHostId].name || "使用者" + newHostId.substring(0, 4);
     log(`👑 已將房主轉交給: ${newHostName}`);
     
+    // 重新載入成員列表
     showMemberList();
   } catch (err) {
     log("❌ 轉交房主失敗: " + err.message);
   }
 }
 
+// 踢除成員
 async function kickMember(memberId) {
   if (!currentRoomId) return;
   
@@ -243,18 +262,22 @@ async function kickMember(memberId) {
     
     const roomData = snapshot.val();
     
+    // 確認當前用戶是房主
     if (roomData.hostId !== currentUserId) {
       log("❌ 只有房主可以踢除成員");
       return;
     }
     
+    // 不能踢除自己
     if (memberId === currentUserId) {
       log("❌ 不能踢除自己");
       return;
     }
     
+    // 移除成員
     await remove(ref(db, `rooms/${currentRoomId}/members/${memberId}`));
     
+    // 關閉與該成員的連接
     if (peerConnections[memberId]) {
       peerConnections[memberId].close();
       delete peerConnections[memberId];
@@ -263,6 +286,7 @@ async function kickMember(memberId) {
     const memberName = roomData.members[memberId]?.name || "使用者" + memberId.substring(0, 4);
     log(`🚫 已踢除成員: ${memberName}`);
     
+    // 重新載入成員列表
     showMemberList();
   } catch (err) {
     log("❌ 踢除成員失敗: " + err.message);
@@ -273,20 +297,24 @@ function hideMemberList() {
   document.getElementById("memberModal").classList.add("hidden");
 }
 
+// 點擊成員計數顯示列表
 document.getElementById("memberCount").onclick = () => {
   showMemberList();
 };
 
+// 關閉彈窗
 document.getElementById("closeMemberModal").onclick = () => {
   hideMemberList();
 };
 
+// 點擊遮罩關閉
 document.getElementById("memberModal").onclick = (e) => {
   if (e.target.id === "memberModal") {
     hideMemberList();
   }
 };
 
+// 更新名稱
 document.getElementById("updateNameBtn").onclick = async () => {
   const newName = document.getElementById("newNameInput").value.trim();
   
@@ -311,12 +339,14 @@ document.getElementById("updateNameBtn").onclick = async () => {
     document.getElementById("newNameInput").value = "";
     log("✅ 名稱已更新為: " + newName);
     
+    // 重新載入成員列表
     showMemberList();
   } catch (err) {
     log("❌ 更新名稱失敗: " + err.message);
   }
 };
 
+// Enter 快速更新名稱
 document.getElementById("newNameInput").addEventListener("keypress", (e) => {
   if (e.key === "Enter") {
     document.getElementById("updateNameBtn").click();
@@ -345,6 +375,7 @@ document.getElementById("createRoomBtn").onclick = async () => {
   membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
     const members = snapshot.val();
     if (members) {
+      // 檢查自己是否還在成員列表中
       if (!members[currentUserId]) {
         log("🚫 您已被踢出房間");
         handleKickedOut();
@@ -360,6 +391,7 @@ document.getElementById("createRoomBtn").onclick = async () => {
         lastMemberCount = memberCount;
       }
     } else {
+      // 房間被刪除
       log("🗑️ 房間已被刪除");
       handleKickedOut();
     }
@@ -370,6 +402,7 @@ document.getElementById("createRoomBtn").onclick = async () => {
   showInRoomUI(currentRoomId);
   updateRoomLinkUI(url);
   
+  // 初始化聊天監聽
   initChatListener();
 
   log("🎯 你是 Host");
@@ -433,6 +466,7 @@ async function joinRoom(roomId) {
   membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
     const members = snapshot.val();
     if (members) {
+      // 檢查自己是否還在成員列表中
       if (!members[currentUserId]) {
         log("🚫 您已被踢出房間");
         handleKickedOut();
@@ -448,6 +482,7 @@ async function joinRoom(roomId) {
         lastMemberCount = memberCount;
       }
     } else {
+      // 房間被刪除
       log("🗑️ 房間已被刪除");
       handleKickedOut();
     }
@@ -469,6 +504,7 @@ async function joinRoom(roomId) {
   showInRoomUI(roomId);
   updateRoomLinkUI(url);
   
+  // 初始化聊天監聽
   initChatListener();
   
   log("✅ 加入房間: " + roomId);
@@ -550,13 +586,16 @@ function clearChatMessages() {
 function initChatListener() {
   if (!currentRoomId) return;
   
+  // 清空現有訊息
   clearChatMessages();
   
+  // 監聽新訊息
   const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
   messagesListener = onValue(messagesRef, (snapshot) => {
     const messages = snapshot.val();
     
     if (messages) {
+      // 清空聊天區（保留系統訊息除外，或全部清空重新渲染）
       const chatMessages = document.getElementById("chatMessages");
       chatMessages.innerHTML = `
         <div class="message received">
@@ -565,8 +604,10 @@ function initChatListener() {
         </div>
       `;
       
+      // 按時間排序訊息
       const sortedMessages = Object.entries(messages).sort(([, a], [, b]) => a.timestamp - b.timestamp);
       
+      // 渲染所有訊息
       sortedMessages.forEach(([messageId, messageData]) => {
         displayMessage(messageData);
       });
@@ -583,17 +624,10 @@ function displayMessage(messageData) {
   
   const senderName = isMe ? "我" : (messageData.userName || "使用者");
   
-  if (messageData.type === 'image') {
-    messageDiv.innerHTML = `
-      <div class="message-sender">${senderName}</div>
-      <img src="${messageData.imageUrl}" class="message-image" alt="圖片" onclick="window.open('${messageData.imageUrl}', '_blank')">
-    `;
-  } else {
-    messageDiv.innerHTML = `
-      <div class="message-sender">${senderName}</div>
-      <div>${escapeHtml(messageData.text)}</div>
-    `;
-  }
+  messageDiv.innerHTML = `
+    <div class="message-sender">${senderName}</div>
+    <div>${escapeHtml(messageData.text)}</div>
+  `;
   
   chatMessages.appendChild(messageDiv);
   chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -612,57 +646,17 @@ async function sendMessage(text) {
     userId: currentUserId,
     userName: currentUserName,
     text: text.trim(),
-    type: 'text',
-    timestamp: Date.now()
+    timestamp: serverTimestamp() // 使用 Firebase 伺服器時間
   };
   
   try {
+    const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
+    // 使用唯一 key 避免衝突
     const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + currentUserId + "_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7));
     await set(newMessageRef, messageData);
     log("💬 訊息已發送");
   } catch (err) {
     log("❌ 發送訊息失敗: " + err.message);
-  }
-}
-
-async function sendImage(file) {
-  if (!currentRoomId || !file) return;
-  
-  if (!file.type.startsWith('image/')) {
-    log("❌ 只能傳送圖片檔案");
-    return;
-  }
-  
-  if (file.size > 5 * 1024 * 1024) {
-    log("❌ 圖片大小不能超過 5MB");
-    alert("圖片大小不能超過 5MB");
-    return;
-  }
-  
-  try {
-    log("📤 正在上傳圖片...");
-    
-    const fileName = `${currentRoomId}/${currentUserId}_${Date.now()}_${file.name}`;
-    const imageRef = storageRef(storage, `chat-images/${fileName}`);
-    await uploadBytes(imageRef, file);
-    
-    const imageUrl = await getDownloadURL(imageRef);
-    
-    const messageData = {
-      userId: currentUserId,
-      userName: currentUserName,
-      type: 'image',
-      imageUrl: imageUrl,
-      timestamp: Date.now()
-    };
-    
-    const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + currentUserId + "_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7));
-    await set(newMessageRef, messageData);
-    
-    log("✅ 圖片已發送");
-  } catch (err) {
-    log("❌ 上傳圖片失敗: " + err.message);
-    alert("上傳圖片失敗，請稍後再試");
   }
 }
 
@@ -673,18 +667,6 @@ document.getElementById("sendBtn").onclick = () => {
   
   sendMessage(message);
   input.value = "";
-};
-
-document.getElementById("imageBtn").onclick = () => {
-  document.getElementById("imageInput").click();
-};
-
-document.getElementById("imageInput").onchange = (e) => {
-  const file = e.target.files[0];
-  if (file) {
-    sendImage(file);
-  }
-  e.target.value = "";
 };
 
 // ===== 螢幕分享功能 =====
