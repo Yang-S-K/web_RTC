@@ -21,6 +21,7 @@ let peerConnections = {};
 let membersListener = null;
 let hostListener = null;
 let currentMembers = {};
+let messagesListener = null;
 
 const log = (msg) => {
   const logEl = document.getElementById("log");
@@ -79,6 +80,10 @@ function handleKickedOut() {
     hostListener();
     hostListener = null;
   }
+  if (messagesListener) {
+    messagesListener();
+    messagesListener = null;
+  }
 
   // 關閉所有連接
   Object.values(peerConnections).forEach(pc => pc.close());
@@ -93,6 +98,9 @@ function handleKickedOut() {
   const roomId = currentRoomId;
   currentRoomId = null;
   currentMembers = {};
+  
+  // 清空聊天記錄
+  clearChatMessages();
   
   // 重置 UI
   resetUI();
@@ -393,6 +401,9 @@ document.getElementById("createRoomBtn").onclick = async () => {
   
   showInRoomUI(currentRoomId);
   updateRoomLinkUI(url);
+  
+  // 初始化聊天監聽
+  initChatListener();
 
   log("🎯 你是 Host");
   log("✅ 建立房間: " + currentRoomId);
@@ -493,6 +504,9 @@ async function joinRoom(roomId) {
   showInRoomUI(roomId);
   updateRoomLinkUI(url);
   
+  // 初始化聊天監聽
+  initChatListener();
+  
   log("✅ 加入房間: " + roomId);
 }
 
@@ -508,8 +522,10 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
 
   if (membersListener) membersListener();
   if (hostListener) hostListener();
+  if (messagesListener) messagesListener();
   membersListener = null;
   hostListener = null;
+  messagesListener = null;
 
   Object.values(peerConnections).forEach(pc => pc.close());
   peerConnections = {};
@@ -543,6 +559,7 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
   log("👋 已離開房間: " + currentRoomId);
   currentRoomId = null;
   currentMembers = {};
+  clearChatMessages();
   resetUI();
 };
 
@@ -556,20 +573,99 @@ window.addEventListener("load", () => {
 });
 
 // ===== 聊天功能 =====
+function clearChatMessages() {
+  const chatMessages = document.getElementById("chatMessages");
+  chatMessages.innerHTML = `
+    <div class="message received">
+      <div class="message-sender">系統</div>
+      <div>歡迎來到聊天室！</div>
+    </div>
+  `;
+}
+
+function initChatListener() {
+  if (!currentRoomId) return;
+  
+  // 清空現有訊息
+  clearChatMessages();
+  
+  // 監聽新訊息
+  const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
+  messagesListener = onValue(messagesRef, (snapshot) => {
+    const messages = snapshot.val();
+    
+    if (messages) {
+      // 清空聊天區（保留系統訊息除外，或全部清空重新渲染）
+      const chatMessages = document.getElementById("chatMessages");
+      chatMessages.innerHTML = `
+        <div class="message received">
+          <div class="message-sender">系統</div>
+          <div>歡迎來到聊天室！</div>
+        </div>
+      `;
+      
+      // 按時間排序訊息
+      const sortedMessages = Object.entries(messages).sort(([, a], [, b]) => a.timestamp - b.timestamp);
+      
+      // 渲染所有訊息
+      sortedMessages.forEach(([messageId, messageData]) => {
+        displayMessage(messageData);
+      });
+    }
+  });
+}
+
+function displayMessage(messageData) {
+  const chatMessages = document.getElementById("chatMessages");
+  const messageDiv = document.createElement("div");
+  
+  const isMe = messageData.userId === currentUserId;
+  messageDiv.className = isMe ? "message sent" : "message received";
+  
+  const senderName = isMe ? "我" : (messageData.userName || "使用者");
+  
+  messageDiv.innerHTML = `
+    <div class="message-sender">${senderName}</div>
+    <div>${escapeHtml(messageData.text)}</div>
+  `;
+  
+  chatMessages.appendChild(messageDiv);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function sendMessage(text) {
+  if (!currentRoomId || !text.trim()) return;
+  
+  const messageData = {
+    userId: currentUserId,
+    userName: currentUserName,
+    text: text.trim(),
+    timestamp: Date.now()
+  };
+  
+  try {
+    const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
+    const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + Date.now());
+    await set(newMessageRef, messageData);
+    log("💬 訊息已發送");
+  } catch (err) {
+    log("❌ 發送訊息失敗: " + err.message);
+  }
+}
+
 document.getElementById("sendBtn").onclick = () => {
   const input = document.getElementById("chatInput");
   const message = input.value.trim();
   if (!message) return;
   
-  const chatMessages = document.getElementById("chatMessages");
-  const messageDiv = document.createElement("div");
-  messageDiv.className = "message sent";
-  messageDiv.innerHTML = `<div class="message-sender">我</div><div>${message}</div>`;
-  chatMessages.appendChild(messageDiv);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-  
+  sendMessage(message);
   input.value = "";
-  log("💬 發送訊息: " + message);
 };
 
 // ===== 螢幕分享功能 =====
