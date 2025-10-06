@@ -15,14 +15,14 @@ const db = getDatabase(app);
 
 let pc;
 let currentRoomId = null;
-let currentUserId = Math.random().toString(36).substring(2, 10); // 生成唯一 userId
-let peerConnections = {}; // 儲存多個 PeerConnection (Mesh 模式用)
-let membersListener = null; // 儲存監聽器，方便清理
+let currentUserId = Math.random().toString(36).substring(2, 10);
+let peerConnections = {};
+let membersListener = null;
 let hostListener = null;
 
 const log = (msg) => {
   const logEl = document.getElementById("log");
-  logEl.textContent = msg; // 只保留最新訊息
+  logEl.textContent = msg;
   console.log(msg);
 };
 
@@ -31,9 +31,11 @@ function showInRoomUI(roomId, showQR) {
   document.getElementById("createSection").style.display = "none";
   document.getElementById("joinSection").style.display = "none";
   document.getElementById("leaveSection").style.display = "block";
-
   document.getElementById("roomIdDisplay").textContent = "房號: " + roomId;
-  document.getElementById("qrcode").style.display = showQR ? "block" : "none";
+  
+  // 根據參數決定是否顯示 QR Code
+  const canvas = document.getElementById("qrcode");
+  canvas.style.display = showQR ? "block" : "none";
 }
 
 function setShareButton(url) {
@@ -79,19 +81,22 @@ function resetUI() {
   document.getElementById("createSection").style.display = "block";
   document.getElementById("joinSection").style.display = "block";
   document.getElementById("leaveSection").style.display = "none";
-
   document.getElementById("roomIdDisplay").textContent = "";
-  document.getElementById("qrcode").style.display = "none";
-  document.getElementById("qrcode").getContext("2d").clearRect(0,0,200,200);
+  
+  const canvas = document.getElementById("qrcode");
+  canvas.style.display = "none";
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  
   updateRoomLinkUI(null, false);
 }
 
-// ===== 開房 (改良版) =====
+// ===== 開房 (修正版) =====
 document.getElementById("createRoomBtn").onclick = async () => {
   currentRoomId = Math.random().toString(36).substring(2, 7);
-  showInRoomUI(currentRoomId, true);
-  showInRoomUI(currentRoomId);
-
+  
   // 新的資料結構：包含 members 和 hostId
   const roomData = {
     createdAt: Date.now(),
@@ -121,19 +126,10 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
   const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
   
- // 生成 QR Code
-  QRCode.toCanvas(
-    document.getElementById("qrcode"),
-    url,
-    (err) => {
-      if (err) log("❌ QR Code 生成失敗");
-    }
-  );
-
-  // 設置分享按鈕
-  const shareBtn = document.getElementById("shareBtn");
-  shareBtn.style.display = "inline-block";
-  shareBtn.onclick = () => shareRoom(url);
+  // 更新 UI (只呼叫一次)
+  showInRoomUI(currentRoomId, true);
+  
+  // 生成 QR Code 和設置分享按鈕
   updateRoomLinkUI(url, true);
 
   log("🎯 你是 Host");
@@ -142,7 +138,6 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
 // ===== 分享房間 =====
 async function shareRoom(url) {
-  // 如果瀏覽器支援 Web Share API
   if (navigator.share) {
     try {
       await navigator.share({
@@ -157,12 +152,10 @@ async function shareRoom(url) {
       }
     }
   } else {
-    // 降級方案：複製到剪貼簿
     try {
       await navigator.clipboard.writeText(url);
       log("✅ 連結已複製到剪貼簿");
     } catch (err) {
-      // 再降級：選取文字讓用戶自己複製
       const input = document.createElement("input");
       input.value = url;
       document.body.appendChild(input);
@@ -174,7 +167,7 @@ async function shareRoom(url) {
   }
 }
 
-// ===== 加入房間 (改良版) =====
+// ===== 加入房間 (修正版) =====
 async function joinRoom(roomId) {
   const roomRef = ref(db, "rooms/" + roomId);
   const snap = await get(roomRef);
@@ -217,10 +210,14 @@ async function joinRoom(roomId) {
     }
   });
 
-  showInRoomUI(roomId, false);
-  showInRoomUI(roomId);
   const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+  
+  // 更新 UI (只呼叫一次)
+  showInRoomUI(roomId, true);
+  
+  // 生成 QR Code 和設置分享按鈕
   updateRoomLinkUI(url, true);
+  
   log("✅ 加入房間: " + roomId);
 }
 
@@ -230,7 +227,7 @@ document.getElementById("joinRoomBtn").onclick = async () => {
   joinRoom(roomId);
 };
 
-// ===== 離開房間 (改良版) =====
+// ===== 離開房間 =====
 document.getElementById("leaveRoomBtn").onclick = async () => {
   if (!currentRoomId) return;
 
@@ -258,7 +255,7 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
     if (roomData.hostId === currentUserId) {
       const remainingMembers = Object.entries(members)
         .filter(([id]) => id !== currentUserId)
-        .sort(([, a], [, b]) => a.joinedAt - b.joinedAt); // 按加入時間排序
+        .sort(([, a], [, b]) => a.joinedAt - b.joinedAt);
 
       if (remainingMembers.length > 0) {
         const newHostId = remainingMembers[0][0];
@@ -266,7 +263,6 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
         await update(ref(db, "rooms/" + currentRoomId + "/members/" + newHostId), { isHost: true });
         log("👑 Host 已交接給: " + newHostId);
       } else {
-        // 沒有其他人，刪除房間
         await remove(roomRef);
         log("🗑️ 房間已刪除（最後一人離開）");
       }
@@ -278,7 +274,7 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
   resetUI();
 };
 
-// ===== 自動加入 (URL帶room參數) =====
+// ===== 自動加入 =====
 window.addEventListener("load", () => {
   const urlParams = new URLSearchParams(window.location.search);
   const roomParam = urlParams.get("room");
