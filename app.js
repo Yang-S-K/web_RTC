@@ -17,9 +17,12 @@ let pc;
 let currentRoomId = null;
 let currentUserId = Math.random().toString(36).substring(2, 10); // 生成唯一 userId
 let peerConnections = {}; // 儲存多個 PeerConnection (Mesh 模式用)
+let membersListener = null; // 儲存監聽器，方便清理
+let hostListener = null;
 
 const log = (msg) => {
-  document.getElementById("log").textContent += msg + "\n";
+  const logEl = document.getElementById("log");
+  logEl.textContent = msg + "\n" + logEl.textContent; // 新訊息在上面
   console.log(msg);
 };
 
@@ -63,13 +66,15 @@ document.getElementById("createRoomBtn").onclick = async () => {
   await set(ref(db, "rooms/" + currentRoomId), roomData);
 
   // 監聽房間成員變化
-  onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
+  let lastMemberCount = 1;
+  membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
     const members = snapshot.val();
     if (members) {
       const memberCount = Object.keys(members).length;
-      log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
-      
-      // 這裡之後加入 Mesh/SFU 切換邏輯
+      if (memberCount !== lastMemberCount) {
+        log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
+        lastMemberCount = memberCount;
+      }
     }
   });
 
@@ -82,8 +87,8 @@ document.getElementById("createRoomBtn").onclick = async () => {
     }
   );
 
-  log("✅ 建立房間: " + currentRoomId);
   log("🎯 你是 Host");
+  log("✅ 建立房間: " + currentRoomId);
 };
 
 // ===== 加入房間 (改良版) =====
@@ -105,22 +110,27 @@ async function joinRoom(roomId) {
   });
 
   // 監聽房間成員變化
-  onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
+  let lastMemberCount = 0;
+  membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
     const members = snapshot.val();
     if (members) {
       const memberCount = Object.keys(members).length;
-      log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
+      if (memberCount !== lastMemberCount) {
+        log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
+        lastMemberCount = memberCount;
+      }
     }
   });
 
   // 監聽 Host 變化（用於 Host 交接）
-  onValue(ref(db, "rooms/" + currentRoomId + "/hostId"), (snapshot) => {
+  let lastHostId = null;
+  hostListener = onValue(ref(db, "rooms/" + currentRoomId + "/hostId"), (snapshot) => {
     const hostId = snapshot.val();
-    if (hostId === currentUserId) {
-      log("🎯 你成為新的 Host！");
-      // 這裡之後加入成為 Host 的邏輯
-    } else {
-      log("👤 當前 Host: " + hostId);
+    if (hostId && hostId !== lastHostId) {
+      if (hostId === currentUserId) {
+        log("🎯 你成為新的 Host！");
+      }
+      lastHostId = hostId;
     }
   });
 
@@ -137,6 +147,12 @@ document.getElementById("joinRoomBtn").onclick = async () => {
 // ===== 離開房間 (改良版) =====
 document.getElementById("leaveRoomBtn").onclick = async () => {
   if (!currentRoomId) return;
+
+  // 移除監聽器
+  if (membersListener) membersListener();
+  if (hostListener) hostListener();
+  membersListener = null;
+  hostListener = null;
 
   // 關閉所有 PeerConnection
   Object.values(peerConnections).forEach(pc => pc.close());
