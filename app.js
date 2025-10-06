@@ -28,8 +28,9 @@ const log = (msg) => {
 
 // ===== UI 控制 =====
 function showInRoomUI(roomId) {
-  // 隱藏大廳
-  document.getElementById("lobby").classList.add("hidden");
+  // 隱藏大廳的開房/加入按鈕
+  document.getElementById("createSection").style.display = "none";
+  document.getElementById("joinSection").style.display = "none";
   
   // 顯示房間資訊和主要內容
   document.getElementById("roomInfo").classList.remove("hidden");
@@ -38,7 +39,7 @@ function showInRoomUI(roomId) {
   // 更新房號顯示
   document.getElementById("roomIdDisplay").textContent = "房號: " + roomId;
   
-  // 顯示 QR Section
+  // 顯示 QR Section（在大廳區域）
   document.getElementById("qrSection").style.display = "flex";
 }
 
@@ -58,8 +59,9 @@ function updateRoomLinkUI(url) {
 }
 
 function resetUI() {
-  // 顯示大廳
-  document.getElementById("lobby").classList.remove("hidden");
+  // 顯示大廳的開房/加入按鈕
+  document.getElementById("createSection").style.display = "block";
+  document.getElementById("joinSection").style.display = "block";
   
   // 隱藏房間資訊和主要內容
   document.getElementById("roomInfo").classList.add("hidden");
