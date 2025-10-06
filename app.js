@@ -28,6 +28,7 @@ const log = (msg) => {
 
 // ===== UI 控制 =====
 function showInRoomUI(roomId, showQR) {
+function showInRoomUI(roomId) {
   document.getElementById("createSection").style.display = "none";
   document.getElementById("joinSection").style.display = "none";
   document.getElementById("leaveSection").style.display = "block";
@@ -35,6 +36,7 @@ function showInRoomUI(roomId, showQR) {
   document.getElementById("roomIdDisplay").textContent = "房號: " + roomId;
   document.getElementById("qrcode").style.display = showQR ? "block" : "none";
 }
+
 function setShareButton(url) {
   const shareBtn = document.getElementById("shareBtn");
   if (url) {
@@ -46,6 +48,25 @@ function setShareButton(url) {
   }
 }
 
+function updateRoomLinkUI(url, showQRCode) {
+  const canvas = document.getElementById("qrcode");
+
+  if (showQRCode && url) {
+    canvas.style.display = "block";
+    QRCode.toCanvas(canvas, url, (err) => {
+      if (err) log("❌ QR Code 生成失敗");
+    });
+  } else {
+    canvas.style.display = "none";
+    const context = canvas.getContext("2d");
+    if (context) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  setShareButton(url);
+}
+
 function resetUI() {
   document.getElementById("createSection").style.display = "block";
   document.getElementById("joinSection").style.display = "block";
@@ -54,13 +75,14 @@ function resetUI() {
   document.getElementById("roomIdDisplay").textContent = "";
   document.getElementById("qrcode").style.display = "none";
   document.getElementById("qrcode").getContext("2d").clearRect(0,0,200,200);
-  setShareButton(null);
+  updateRoomLinkUI(null, false);
 }
 
 // ===== 開房 (改良版) =====
 document.getElementById("createRoomBtn").onclick = async () => {
   currentRoomId = Math.random().toString(36).substring(2, 7);
   showInRoomUI(currentRoomId, true);
+  showInRoomUI(currentRoomId);
 
   // 新的資料結構：包含 members 和 hostId
   const roomData = {
@@ -104,8 +126,8 @@ document.getElementById("createRoomBtn").onclick = async () => {
   const shareBtn = document.getElementById("shareBtn");
   shareBtn.style.display = "inline-block";
   shareBtn.onclick = () => shareRoom(url);
-  setShareButton(url);
-  
+  updateRoomLinkUI(url, true);
+
   log("🎯 你是 Host");
   log("✅ 建立房間: " + currentRoomId);
 };
@@ -188,8 +210,9 @@ async function joinRoom(roomId) {
   });
 
   showInRoomUI(roomId, false);
+  showInRoomUI(roomId);
   const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
-  setShareButton(url);
+  updateRoomLinkUI(url, true);
   log("✅ 加入房間: " + roomId);
 }
 
