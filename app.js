@@ -646,12 +646,12 @@ async function sendMessage(text) {
     userId: currentUserId,
     userName: currentUserName,
     text: text.trim(),
-    timestamp: Date.now()
+    timestamp: serverTimestamp() // 使用 Firebase 伺服器時間
   };
   
   try {
     const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
-    // 使用 push() 生成唯一的 key，避免時間衝突
+    // 使用唯一 key 避免衝突
     const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + currentUserId + "_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7));
     await set(newMessageRef, messageData);
     log("💬 訊息已發送");
