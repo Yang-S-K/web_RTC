@@ -328,10 +328,18 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
   await set(ref(db, "rooms/" + currentRoomId), roomData);
 
+
   let lastMemberCount = 1;
   membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
     const members = snapshot.val();
     if (members) {
+      // 檢查自己是否還在成員列表中
+      if (!members[currentUserId]) {
+        log("🚫 您已被踢出房間");
+        handleKickedOut();
+        return;
+      }
+      
       currentMembers = members;
       const memberCount = Object.keys(members).length;
       updateMemberCount(memberCount);
@@ -340,6 +348,10 @@ document.getElementById("createRoomBtn").onclick = async () => {
         log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
         lastMemberCount = memberCount;
       }
+    } else {
+      // 房間被刪除
+      log("🗑️ 房間已被刪除");
+      handleKickedOut();
     }
   });
 
