@@ -651,7 +651,8 @@ async function sendMessage(text) {
   
   try {
     const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
-    const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + Date.now());
+    // 使用 push() 生成唯一的 key，避免時間衝突
+    const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + currentUserId + "_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7));
     await set(newMessageRef, messageData);
     log("💬 訊息已發送");
   } catch (err) {
