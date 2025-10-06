@@ -42,6 +42,7 @@
       align-items: center;
       gap: 15px;
       flex-wrap: wrap;
+      margin-top: 15px;
     }
 
     .room-badge {
@@ -57,6 +58,13 @@
       color: white;
       padding: 8px 16px;
       border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .member-count:hover {
+      background: #8b5ab8;
+      transform: translateY(-2px);
     }
 
     /* 開房/加入區 */
@@ -396,6 +404,131 @@
       display: none !important;
     }
 
+    /* 成員列表彈窗 */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal {
+      background: white;
+      border-radius: 20px;
+      padding: 30px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal h2 {
+      color: #667eea;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #999;
+      transition: color 0.3s;
+    }
+
+    .close-btn:hover {
+      color: #333;
+    }
+
+    .member-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 15px;
+      background: #f8f9ff;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      transition: all 0.3s ease;
+    }
+
+    .member-item:hover {
+      background: #f0f4ff;
+      transform: translateX(5px);
+    }
+
+    .member-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .member-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 18px;
+    }
+
+    .member-name {
+      font-weight: 500;
+      color: #333;
+    }
+
+    .member-badge {
+      background: #ffd700;
+      color: #333;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .you-badge {
+      background: #667eea;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .edit-name-section {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 2px solid #f0f0f0;
+    }
+
+    .edit-name-section h3 {
+      color: #333;
+      margin-bottom: 15px;
+      font-size: 16px;
+    }
+
+    .edit-name-form {
+      display: flex;
+      gap: 10px;
+    }
+
+    .edit-name-form input {
+      flex: 1;
+    }
+
     /* 日誌 */
     .log-container {
       background: white;
@@ -443,7 +576,7 @@
       <h1>🚀 WebRTC 多功能房間</h1>
       <div class="room-info hidden" id="roomInfo">
         <span class="room-badge" id="roomIdDisplay"></span>
-        <span class="member-count" id="memberCount">👥 1 人</span>
+        <span class="member-count" id="memberCount" title="點擊查看成員">👥 1 人</span>
         <button class="btn btn-secondary" id="shareBtn">📤 分享</button>
         <button class="btn btn-secondary" id="leaveRoomBtn">🚪 離開房間</button>
       </div>
@@ -577,6 +710,24 @@
     <div class="log-container">
       <h3 style="color: #667eea; margin-bottom: 15px;">📋 系統日誌</h3>
       <pre id="log">等待操作...</pre>
+    </div>
+
+    <!-- 成員列表彈窗 -->
+    <div id="memberModal" class="modal-overlay hidden">
+      <div class="modal">
+        <h2>
+          <span>👥 房間成員</span>
+          <button class="close-btn" id="closeMemberModal">✕</button>
+        </h2>
+        <div id="memberList"></div>
+        <div class="edit-name-section">
+          <h3>✏️ 修改我的顯示名稱</h3>
+          <div class="edit-name-form">
+            <input type="text" id="newNameInput" placeholder="輸入新名稱...">
+            <button class="btn btn-primary" id="updateNameBtn">更新</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
