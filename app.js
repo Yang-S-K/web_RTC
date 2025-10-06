@@ -1,6 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, set, get, remove, onValue, update, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-
 const firebaseConfig = {
   apiKey: "AIzaSyAg9yuhB3c5s4JqQ_sW7iTVAr3faI3pdd8",
   authDomain: "web-rtc-1f615.firebaseapp.com",
@@ -646,12 +645,10 @@ async function sendMessage(text) {
     userId: currentUserId,
     userName: currentUserName,
     text: text.trim(),
-    timestamp: serverTimestamp() // 使用 Firebase 伺服器時間
+    timestamp: serverTimestamp() // 這樣就對了
   };
   
   try {
-    const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
-    // 使用唯一 key 避免衝突
     const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + currentUserId + "_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7));
     await set(newMessageRef, messageData);
     log("💬 訊息已發送");
