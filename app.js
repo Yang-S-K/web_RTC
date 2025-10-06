@@ -50,12 +50,21 @@ function setShareButton(url) {
 
 function updateRoomLinkUI(url, showQRCode) {
   const canvas = document.getElementById("qrcode");
+  if (!canvas) {
+    setShareButton(url);
+    return;
+  }
 
   if (showQRCode && url) {
-    canvas.style.display = "block";
-    QRCode.toCanvas(canvas, url, (err) => {
-      if (err) log("❌ QR Code 生成失敗");
-    });
+    if (window.QRCode && typeof QRCode.toCanvas === "function") {
+      canvas.style.display = "block";
+      QRCode.toCanvas(canvas, url, (err) => {
+        if (err) log("❌ QR Code 生成失敗");
+      });
+    } else {
+      canvas.style.display = "none";
+      log("⚠️ QR Code 套件尚未載入，無法生成 QR Code");
+    }
   } else {
     canvas.style.display = "none";
     const context = canvas.getContext("2d");
@@ -113,7 +122,7 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
   const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
   
-  // 生成 QR Code
+ // 生成 QR Code
   QRCode.toCanvas(
     document.getElementById("qrcode"),
     url,
