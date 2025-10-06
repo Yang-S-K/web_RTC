@@ -137,12 +137,12 @@ async function createPeerConnection(peerId, isInitiator) {
     };
   }
 
-  // ICE 候選 - 已修正：移除 .toJSON()
+  // ICE 候選
   pc.onicecandidate = (event) => {
     if (event.candidate) {
       const candidateRef = ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/candidates/${Date.now()}`);
       set(candidateRef, {
-        candidate: event.candidate,
+        candidate: event.candidate.toJSON(),
         timestamp: Date.now()
       }).catch(err => console.error('發送 ICE candidate 失敗:', err));
     }
@@ -169,9 +169,8 @@ async function createPeerConnection(peerId, isInitiator) {
         await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        // 已修正：移除 .toJSON()
         await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), {
-          answer: answer,
+          answer: answer.toJSON(),
           timestamp: Date.now()
         });
         log(`📡 已回應 ${peerId} 的連接請求`);
@@ -201,13 +200,13 @@ async function createPeerConnection(peerId, isInitiator) {
     }
   });
 
-  // 如果是發起者，創建 offer - 已修正：移除 .toJSON()
+  // 如果是發起者，創建 offer
   if (isInitiator) {
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/offer`), {
-        offer: offer,
+        offer: offer.toJSON(),
         timestamp: Date.now()
       });
       log(`📡 已發送連接請求給 ${peerId}`);
@@ -556,283 +555,6 @@ async function transferHost(newHostId) {
   
   try {
     const roomRef = ref(db, "rooms/" + currentRoomId);
-  const snap = await get(roomRef);
-  
-  if (snap.exists()) {
-    const roomData = snap.val();
-    const members = roomData.members || {};
-    
-    await remove(ref(db, "rooms/" + currentRoomId + "/members/" + currentUserId));
-
-    if (roomData.hostId === currentUserId) {
-      const remainingMembers = Object.entries(members)
-        .filter(([id]) => id !== currentUserId)
-        .sort(([, a], [, b]) => a.joinedAt - b.joinedAt);
-
-      if (remainingMembers.length > 0) {
-        const newHostId = remainingMembers[0][0];
-        await update(ref(db, "rooms/" + currentRoomId), { hostId: newHostId });
-        await update(ref(db, "rooms/" + currentRoomId + "/members/" + newHostId), { isHost: true });
-        log("👑 Host 已交接給: " + newHostId);
-      } else {
-        await remove(roomRef);
-        log("🗑️ 房間已刪除（最後一人離開）");
-      }
-    }
-  }
-
-  log("👋 已離開房間: " + currentRoomId);
-  currentRoomId = null;
-  currentMembers = {};
-  clearChatMessages();
-  resetUI();
-};
-
-// ===== 自動加入 =====
-window.addEventListener("load", () => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const roomParam = urlParams.get("room");
-  if (roomParam) {
-    joinRoom(roomParam);
-  }
-});
-
-// ===== 聊天功能 =====
-function clearChatMessages() {
-  const chatMessages = document.getElementById("chatMessages");
-  chatMessages.innerHTML = `
-    <div class="message received">
-      <div class="message-sender">系統</div>
-      <div>歡迎來到聊天室！</div>
-    </div>
-  `;
-}
-
-function initChatListener() {
-  if (!currentRoomId) return;
-  
-  clearChatMessages();
-  
-  const messagesRef = ref(db, "rooms/" + currentRoomId + "/messages");
-  messagesListener = onValue(messagesRef, (snapshot) => {
-    const messages = snapshot.val();
-    
-    if (messages) {
-      const chatMessages = document.getElementById("chatMessages");
-      chatMessages.innerHTML = `
-        <div class="message received">
-          <div class="message-sender">系統</div>
-          <div>歡迎來到聊天室！</div>
-        </div>
-      `;
-      
-      const sortedMessages = Object.entries(messages).sort(([, a], [, b]) => a.timestamp - b.timestamp);
-      
-      sortedMessages.forEach(([messageId, messageData]) => {
-        displayMessage(messageData);
-      });
-    }
-  });
-}
-
-function displayMessage(messageData) {
-  const chatMessages = document.getElementById("chatMessages");
-  const messageDiv = document.createElement("div");
-  
-  const isMe = messageData.userId === currentUserId;
-  messageDiv.className = isMe ? "message sent" : "message received";
-  
-  const senderName = isMe ? "我" : (messageData.userName || "使用者");
-  
-  messageDiv.innerHTML = `
-    <div class="message-sender">${senderName}</div>
-    <div>${escapeHtml(messageData.text)}</div>
-  `;
-  
-  chatMessages.appendChild(messageDiv);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-async function sendMessage(text) {
-  if (!currentRoomId || !text.trim()) return;
-  
-  const messageData = {
-    userId: currentUserId,
-    userName: currentUserName,
-    text: text.trim(),
-    timestamp: serverTimestamp()
-  };
-  
-  try {
-    const newMessageRef = ref(db, "rooms/" + currentRoomId + "/messages/" + currentUserId + "_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7));
-    await set(newMessageRef, messageData);
-    log("💬 訊息已發送");
-  } catch (err) {
-    log("❌ 發送訊息失敗: " + err.message);
-  }
-}
-
-document.getElementById("sendBtn").onclick = () => {
-  const input = document.getElementById("chatInput");
-  const message = input.value.trim();
-  if (!message) return;
-  
-  sendMessage(message);
-  input.value = "";
-};
-
-// ===== 螢幕分享功能 =====
-document.getElementById("startScreenBtn").onclick = async () => {
-  try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-      video: true,
-      audio: false 
-    });
-    
-    const video = document.getElementById("screenVideo");
-    video.srcObject = screenStream;
-    video.style.display = "block";
-    
-    document.getElementById("videoPlaceholder").style.display = "none";
-    document.getElementById("startScreenBtn").classList.add("hidden");
-    document.getElementById("stopScreenBtn").classList.remove("hidden");
-    
-    log("🎬 開始分享螢幕");
-    
-    screenStream.getVideoTracks()[0].onended = () => {
-      stopScreenShare();
-    };
-  } catch (err) {
-    log("❌ 無法分享螢幕: " + err.message);
-  }
-};
-
-document.getElementById("stopScreenBtn").onclick = () => {
-  stopScreenShare();
-};
-
-function stopScreenShare() {
-  if (screenStream) {
-    screenStream.getTracks().forEach(track => track.stop());
-    screenStream = null;
-  }
-  
-  const video = document.getElementById("screenVideo");
-  video.srcObject = null;
-  video.style.display = "none";
-  
-  document.getElementById("videoPlaceholder").style.display = "block";
-  document.getElementById("startScreenBtn").classList.remove("hidden");
-  document.getElementById("stopScreenBtn").classList.add("hidden");
-  
-  log("⏹️ 停止分享螢幕");
-}
-
-// ===== 檔案選擇處理 =====
-const fileInput = document.getElementById('fileInput');
-const dropZone = document.getElementById('fileDropZone');
-
-fileInput.addEventListener('change', (e) => {
-  const files = e.target.files;
-  if (files.length > 0) {
-    Array.from(files).forEach(file => {
-      sendFile(file);
-    });
-  }
-  fileInput.value = ''; // 重置input
-});
-
-dropZone.addEventListener('click', () => {
-  fileInput.click();
-});
-
-dropZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropZone.classList.add('dragover');
-});
-
-dropZone.addEventListener('dragleave', () => {
-  dropZone.classList.remove('dragover');
-});
-
-dropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('dragover');
-  
-  const files = e.dataTransfer.files;
-  if (files.length > 0) {
-    Array.from(files).forEach(file => {
-      sendFile(file);
-    });
-  }
-});
-
-// ===== 成員相關事件 =====
-document.getElementById("memberCount").onclick = () => {
-  showMemberList();
-};
-
-document.getElementById("closeMemberModal").onclick = () => {
-  hideMemberList();
-};
-
-document.getElementById("memberModal").onclick = (e) => {
-  if (e.target.id === "memberModal") {
-    hideMemberList();
-  }
-};
-
-document.getElementById("updateNameBtn").onclick = async () => {
-  const newName = document.getElementById("newNameInput").value.trim();
-  
-  if (!newName) {
-    alert("請輸入名稱");
-    return;
-  }
-  
-  if (newName.length > 20) {
-    alert("名稱不能超過 20 個字");
-    return;
-  }
-  
-  if (!currentRoomId) return;
-  
-  try {
-    await update(ref(db, "rooms/" + currentRoomId + "/members/" + currentUserId), {
-      name: newName
-    });
-    
-    currentUserName = newName;
-    document.getElementById("newNameInput").value = "";
-    log("✅ 名稱已更新為: " + newName);
-    
-    showMemberList();
-  } catch (err) {
-    log("❌ 更新名稱失敗: " + err.message);
-  }
-};
-
-document.getElementById("newNameInput").addEventListener("keypress", (e) => {
-  if (e.key === "Enter") {
-    document.getElementById("updateNameBtn").click();
-  }
-});
-
-// ===== 遊戲選擇 =====
-document.querySelectorAll('.game-card').forEach(card => {
-  card.addEventListener('click', () => {
-    const game = card.dataset.game;
-    const gameName = card.querySelector('.game-title').textContent;
-    log(`🎮 選擇遊戲: ${gameName}`);
-    alert(`即將開始 ${gameName}！\n(遊戲功能開發中...)`);
-  });
-});RoomId);
     const snapshot = await get(roomRef);
     
     if (!snapshot.exists()) {
