@@ -441,10 +441,10 @@
     <!-- 標題區 -->
     <div class="header">
       <h1>🚀 WebRTC 多功能房間</h1>
-      <div class="room-info" id="roomInfo" style="display: none;">
+      <div class="room-info hidden" id="roomInfo">
         <span class="room-badge" id="roomIdDisplay"></span>
         <span class="member-count" id="memberCount">👥 1 人</span>
-        <button class="btn btn-secondary" id="shareBtn" style="display: none;">📤 分享</button>
+        <button class="btn btn-secondary" id="shareBtn">📤 分享</button>
         <button class="btn btn-secondary" id="leaveRoomBtn">🚪 離開房間</button>
       </div>
     </div>
@@ -452,12 +452,12 @@
     <!-- 大廳區 (開房/加入) -->
     <div class="lobby" id="lobby">
       <h2>開始使用 WebRTC 多功能房間</h2>
-      <div class="lobby-buttons">
+      <div class="lobby-buttons" id="createSection">
         <button class="btn btn-primary" id="createRoomBtn">🎯 建立房間</button>
-        <div style="display: flex; gap: 10px; align-items: center;">
-          <input type="text" id="joinRoomId" placeholder="輸入房號">
-          <button class="btn btn-primary" id="joinRoomBtn">🚀 加入房間</button>
-        </div>
+      </div>
+      <div class="lobby-buttons" id="joinSection">
+        <input type="text" id="joinRoomId" placeholder="輸入房號">
+        <button class="btn btn-primary" id="joinRoomBtn">🚀 加入房間</button>
       </div>
       <div class="qr-section" id="qrSection" style="display: none; justify-content: center; margin-top: 30px;">
         <canvas id="qrcode" width="200" height="200"></canvas>
@@ -587,11 +587,9 @@
     // 功能切換
     document.querySelectorAll('.feature-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        // 更新按鈕狀態
         document.querySelectorAll('.feature-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
 
-        // 顯示對應功能
         const feature = btn.dataset.feature;
         document.querySelectorAll('.feature-panel').forEach(panel => {
           panel.classList.add('hidden');
@@ -618,7 +616,6 @@
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('dragover');
-      // 處理檔案
       console.log('Files dropped:', e.dataTransfer.files);
     });
 
@@ -629,16 +626,6 @@
         document.getElementById('sendBtn').click();
       }
     });
-
-    // 簡單的日誌函數
-    const log = (msg) => {
-      const logEl = document.getElementById('log');
-      const timestamp = new Date().toLocaleTimeString();
-      logEl.textContent = `[${timestamp}] ${msg}\n` + logEl.textContent;
-      console.log(msg);
-    };
-
-    log('介面初始化完成');
   </script>
 
   <!-- app.js (ESM 模式) -->
