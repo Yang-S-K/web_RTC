@@ -2,29 +2,37 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>WebRTC Chat Demo</title>
+  <title>WebRTC Chat Demo with QRCode</title>
+  <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <!-- QR Code Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     body { font-family: Arial; padding:20px; }
     #chat { border:1px solid #ccc; height:200px; overflow:auto; margin-top:10px; }
     #msg { width:80%; }
     #status { margin:10px 0; font-weight:bold; color:blue; }
+    #qrcode { margin-top:10px; }
   </style>
 </head>
 <body>
   <h2>WebRTC Chat Demo</h2>
-  <label>房號：</label><input id="roomId" type="text">
+
   <button onclick="createRoom()">開房</button>
   <button onclick="joinRoom()">加入</button>
-
+  <br><br>
+  <label>房號：</label><input id="roomId" type="text" readonly>
   <div id="status">尚未建立房間</div>
 
+  <div id="qrcode"></div>
+
+  <h3>聊天室</h3>
   <div id="chat"></div>
   <input id="msg" type="text"><button onclick="sendMsg()">送出</button>
 
 <script>
-  // === Firebase 設定 ===
+  // === Firebase 設定（請換成你自己的專案） ===
     const firebaseConfig = {
     apiKey: "AIzaSyAg9yuhB3c5s4Jq0_sW7iTVAr3fal3pdd8",
     authDomain: "web-rtc-1f615.firebaseapp.com",
@@ -36,7 +44,7 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 
-  // === WebRTC 相關 ===
+  // === WebRTC ===
   let pc, channel, roomRef;
   const servers = { iceServers: [{urls: "stun:stun.l.google.com:19302"}] };
 
@@ -44,37 +52,46 @@
     document.getElementById("status").innerText = text;
   }
 
+  function randomId(len = 6) {
+    return Math.random().toString(36).substr(2, len);
+  }
+
   async function createRoom() {
-    const roomId = document.getElementById('roomId').value;
-    if (!roomId) return alert("請輸入房號");
+    const roomId = randomId();
+    document.getElementById('roomId').value = roomId;
     roomRef = db.ref("rooms/"+roomId);
+
+    // 建立 QR Code
+    document.getElementById("qrcode").innerHTML = "";
+    const url = window.location.origin + window.location.pathname + "?room=" + roomId;
+    new QRCode(document.getElementById("qrcode"), {
+      text: url,
+      width: 128,
+      height: 128
+    });
 
     pc = new RTCPeerConnection(servers);
 
-    // 建立 DataChannel
+    // DataChannel
     channel = pc.createDataChannel("chat");
     channel.onopen = () => setStatus("✅ DataChannel 已開啟，可以聊天");
     channel.onclose = () => setStatus("❌ DataChannel 已關閉");
     channel.onmessage = e => addMsg("對方: " + e.data);
 
-    // ICE candidate
     pc.onicecandidate = e => {
       if (e.candidate) roomRef.child("callerCandidates").push(JSON.stringify(e.candidate));
     };
 
-    // 連線狀態
     pc.onconnectionstatechange = () => {
       setStatus("連線狀態：" + pc.connectionState);
     };
 
-    // 建立 Offer
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await roomRef.set({ offer: JSON.stringify(offer) });
 
-    setStatus("房間建立完成，等待加入...");
+    setStatus("房間建立完成，請分享 QR Code 給朋友");
 
-    // 等待 Answer
     roomRef.child("answer").on("value", async snap => {
       if (snap.val() && !pc.currentRemoteDescription) {
         const answer = JSON.parse(snap.val());
@@ -83,7 +100,6 @@
       }
     });
 
-    // 對方 ICE
     roomRef.child("calleeCandidates").on("child_added", snap => {
       pc.addIceCandidate(JSON.parse(snap.val()));
     });
@@ -91,11 +107,11 @@
 
   async function joinRoom() {
     const roomId = document.getElementById('roomId').value;
-    if (!roomId) return alert("請輸入房號");
+    if (!roomId) return alert("請先輸入或用 QR Code 連結帶入房號");
+
     roomRef = db.ref("rooms/"+roomId);
     pc = new RTCPeerConnection(servers);
 
-    // 接收 DataChannel
     pc.ondatachannel = e => {
       channel = e.channel;
       channel.onopen = () => setStatus("✅ DataChannel 已開啟，可以聊天");
@@ -103,27 +119,23 @@
       channel.onmessage = ev => addMsg("對方: " + ev.data);
     };
 
-    // ICE candidate
     pc.onicecandidate = e => {
       if (e.candidate) roomRef.child("calleeCandidates").push(JSON.stringify(e.candidate));
     };
 
-    // 讀取 Offer
     const roomData = (await roomRef.get()).val();
     if (!roomData || !roomData.offer) {
-      return setStatus("❌ 房間不存在，請先讓對方建立房間");
+      return setStatus("❌ 房間不存在");
     }
     const offer = JSON.parse(roomData.offer);
     await pc.setRemoteDescription(offer);
 
-    // 建立 Answer
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     await roomRef.child("answer").set(JSON.stringify(answer));
 
     setStatus("已加入房間，等待連線...");
 
-    // 對方 ICE
     roomRef.child("callerCandidates").on("child_added", snap => {
       pc.addIceCandidate(JSON.parse(snap.val()));
     });
@@ -131,7 +143,7 @@
 
   function sendMsg() {
     if (!channel || channel.readyState !== "open") {
-      alert("連線尚未建立，不能發送訊息！");
+      alert("連線尚未建立");
       return;
     }
     const text = document.getElementById("msg").value;
@@ -145,6 +157,16 @@
     div.innerHTML += "<div>"+text+"</div>";
     div.scrollTop = div.scrollHeight;
   }
+
+  // === 啟動時檢查網址參數 ===
+  window.onload = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get("room");
+    if (roomId) {
+      document.getElementById("roomId").value = roomId;
+      joinRoom(); // 自動加入
+    }
+  };
 </script>
 </body>
 </html>
