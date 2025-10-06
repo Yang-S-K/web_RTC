@@ -68,6 +68,40 @@ function resetUI() {
   }
 }
 
+// ===== 處理被踢出房間 =====
+function handleKickedOut() {
+  // 關閉所有監聽器
+  if (membersListener) {
+    membersListener();
+    membersListener = null;
+  }
+  if (hostListener) {
+    hostListener();
+    hostListener = null;
+  }
+
+  // 關閉所有連接
+  Object.values(peerConnections).forEach(pc => pc.close());
+  peerConnections = {};
+
+  // 停止螢幕分享
+  if (screenStream) {
+    stopScreenShare();
+  }
+
+  // 重置狀態
+  const roomId = currentRoomId;
+  currentRoomId = null;
+  currentMembers = {};
+  
+  // 重置 UI
+  resetUI();
+  
+  // 顯示提示
+  log("🚫 您已被移出房間: " + roomId);
+  alert("您已被移出房間");
+}
+
 // ===== 成員列表功能 =====
 function showMemberList() {
   const modal = document.getElementById("memberModal");
@@ -250,6 +284,7 @@ async function kickMember(memberId) {
     log("❌ 踢除成員失敗: " + err.message);
   }
 }
+
 function hideMemberList() {
   document.getElementById("memberModal").classList.add("hidden");
 }
@@ -327,7 +362,6 @@ document.getElementById("createRoomBtn").onclick = async () => {
   };
 
   await set(ref(db, "rooms/" + currentRoomId), roomData);
-
 
   let lastMemberCount = 1;
   membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
@@ -421,6 +455,13 @@ async function joinRoom(roomId) {
   membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), (snapshot) => {
     const members = snapshot.val();
     if (members) {
+      // 檢查自己是否還在成員列表中
+      if (!members[currentUserId]) {
+        log("🚫 您已被踢出房間");
+        handleKickedOut();
+        return;
+      }
+      
       currentMembers = members;
       const memberCount = Object.keys(members).length;
       updateMemberCount(memberCount);
@@ -429,6 +470,10 @@ async function joinRoom(roomId) {
         log(`👥 當前人數: ${memberCount} (${memberCount <= 5 ? 'Mesh模式' : 'SFU模式'})`);
         lastMemberCount = memberCount;
       }
+    } else {
+      // 房間被刪除
+      log("🗑️ 房間已被刪除");
+      handleKickedOut();
     }
   });
 
