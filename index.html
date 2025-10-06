@@ -31,7 +31,7 @@
   <input id="msg" type="text"><button onclick="sendMsg()">送出</button>
 
 <script>
-  // === Firebase 設定（已加上 databaseURL） ===
+  // === Firebase 設定 ===
   const firebaseConfig = {
     apiKey: "AIzaSyAg9yuhB3c5s4JqQ_sW7iTVAr3faI3pdd8",
     authDomain: "web-rtc-1f615.firebaseapp.com",
@@ -43,6 +43,7 @@
   };
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
+  console.log("✅ Firebase initialized", firebaseConfig);
 
   // === WebRTC ===
   let pc, channel, roomRef;
@@ -50,6 +51,7 @@
 
   function setStatus(text) {
     document.getElementById("status").innerText = text;
+    console.log("📢 狀態更新:", text);
   }
 
   function randomId(len = 6) {
@@ -60,6 +62,7 @@
     const roomId = randomId();
     document.getElementById('roomId').value = roomId;
     roomRef = db.ref("rooms/"+roomId);
+    console.log("🆕 建立房號:", roomId);
 
     // 建立 QR Code
     document.getElementById("qrcode").innerHTML = "";
@@ -69,6 +72,7 @@
       width: 128,
       height: 128
     });
+    console.log("📱 QR Code 已生成:", url);
 
     pc = new RTCPeerConnection(servers);
 
@@ -76,24 +80,35 @@
     channel = pc.createDataChannel("chat");
     channel.onopen = () => setStatus("✅ DataChannel 已開啟，可以聊天");
     channel.onclose = () => setStatus("❌ DataChannel 已關閉");
-    channel.onmessage = e => addMsg("對方: " + e.data);
+    channel.onmessage = e => {
+      console.log("📩 收到訊息:", e.data);
+      addMsg("對方: " + e.data);
+    };
 
     pc.onicecandidate = e => {
-      if (e.candidate) roomRef.child("callerCandidates").push(JSON.stringify(e.candidate));
+      if (e.candidate) {
+        console.log("🧊 Caller ICE candidate:", e.candidate);
+        roomRef.child("callerCandidates").push(JSON.stringify(e.candidate));
+      }
     };
 
     pc.onconnectionstatechange = () => {
+      console.log("🔗 Connection state:", pc.connectionState);
       setStatus("連線狀態：" + pc.connectionState);
     };
 
+    console.log("📡 建立 Offer 中...");
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    await roomRef.set({ offer: JSON.stringify(offer) });
+    console.log("✅ Offer 建立完成:", offer);
 
+    console.log("📤 寫入 Firebase...");
+    await roomRef.set({ offer: JSON.stringify(offer) });
     setStatus("房間建立完成，請分享 QR Code 給朋友");
 
     roomRef.child("answer").on("value", async snap => {
       if (snap.val() && !pc.currentRemoteDescription) {
+        console.log("📥 收到 Answer:", snap.val());
         const answer = JSON.parse(snap.val());
         await pc.setRemoteDescription(answer);
         setStatus("對方已加入房間，正在連線...");
@@ -101,6 +116,7 @@
     });
 
     roomRef.child("calleeCandidates").on("child_added", snap => {
+      console.log("📥 收到 Callee ICE:", snap.val());
       pc.addIceCandidate(JSON.parse(snap.val()));
     });
   }
@@ -108,19 +124,28 @@
   async function joinRoom(roomId) {
     if (!roomId) return alert("房號不存在");
     roomRef = db.ref("rooms/"+roomId);
+    console.log("🔑 加入房號:", roomId);
+
     pc = new RTCPeerConnection(servers);
 
     pc.ondatachannel = e => {
       channel = e.channel;
       channel.onopen = () => setStatus("✅ DataChannel 已開啟，可以聊天");
       channel.onclose = () => setStatus("❌ DataChannel 已關閉");
-      channel.onmessage = ev => addMsg("對方: " + ev.data);
+      channel.onmessage = ev => {
+        console.log("📩 收到訊息:", ev.data);
+        addMsg("對方: " + ev.data);
+      };
     };
 
     pc.onicecandidate = e => {
-      if (e.candidate) roomRef.child("calleeCandidates").push(JSON.stringify(e.candidate));
+      if (e.candidate) {
+        console.log("🧊 Callee ICE candidate:", e.candidate);
+        roomRef.child("calleeCandidates").push(JSON.stringify(e.candidate));
+      }
     };
 
+    console.log("📥 讀取房間資料...");
     const roomData = (await roomRef.get()).val();
     if (!roomData || !roomData.offer) {
       return setStatus("❌ 房間不存在");
@@ -128,13 +153,18 @@
     const offer = JSON.parse(roomData.offer);
     await pc.setRemoteDescription(offer);
 
+    console.log("📡 建立 Answer 中...");
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+    console.log("✅ Answer 建立完成:", answer);
+
+    console.log("📤 回傳 Answer 到 Firebase...");
     await roomRef.child("answer").set(JSON.stringify(answer));
 
     setStatus("已加入房間，等待連線...");
 
     roomRef.child("callerCandidates").on("child_added", snap => {
+      console.log("📥 收到 Caller ICE:", snap.val());
       pc.addIceCandidate(JSON.parse(snap.val()));
     });
   }
@@ -145,6 +175,7 @@
       return;
     }
     const text = document.getElementById("msg").value;
+    console.log("📤 發送訊息:", text);
     channel.send(text);
     addMsg("我: " + text);
     document.getElementById("msg").value = "";
@@ -162,6 +193,7 @@
     const roomId = urlParams.get("room");
     if (roomId) {
       document.getElementById("roomId").value = roomId;
+      console.log("🚪 進入網址帶房號，自動加入:", roomId);
       joinRoom(roomId); // 自動加入
     }
   };
