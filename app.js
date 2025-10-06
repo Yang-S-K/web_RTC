@@ -22,7 +22,7 @@ let hostListener = null;
 
 const log = (msg) => {
   const logEl = document.getElementById("log");
-  logEl.textContent = msg + "\n" + logEl.textContent; // 新訊息在上面
+  logEl.textContent = msg; // 只保留最新訊息
   console.log(msg);
 };
 
