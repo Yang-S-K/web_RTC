@@ -17,13 +17,9 @@
 
   <pre id="log"></pre>
 
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js"></script>
-
-  <!-- QRCode 套件 -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-
-  <!-- 你的程式 -->
+  <!-- ✅ 必須指定 module -->
   <script type="module" src="app.js"></script>
+
+  <!-- QRCode 套件放在 module 前也可以用 -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 </body>
