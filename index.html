@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WebRTC MultiApp Demo</title>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <style>
+    body { font-family: Arial; padding:20px; }
+    #chat { border:1px solid #ccc; height:200px; overflow:auto; margin-top:10px; }
+    #msg { width:80%; }
+  </style>
+</head>
+<body>
+  <h2>WebRTC Chat Demo</h2>
+  <label>房號：</label><input id="roomId" type="text">
+  <button onclick="createRoom()">開房</button>
+  <button onclick="joinRoom()">加入</button>
+
+  <div id="chat"></div>
+  <input id="msg" type="text"><button onclick="sendMsg()">送出</button>
+
+<script>
+  // === Firebase 設定 ===
+    const firebaseConfig = {
+    apiKey: "AIzaSyAg9yuhB3c5s4Jq0_sW7iTVAr3fal3pdd8",
+    authDomain: "web-rtc-1f615.firebaseapp.com",
+    projectId: "web-rtc-1f615",
+    storageBucket: "web-rtc-1f615.firebasestorage.app",
+    messagingSenderId: "360978320587",
+    appId: "1:360978320587:web:8f1bf80a69c19e21051f4e"
+    };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // === WebRTC 相關 ===
+  let pc, channel, roomRef;
+  const servers = { iceServers: [{urls: "stun:stun.l.google.com:19302"}] };
+
+  async function createRoom() {
+    const roomId = document.getElementById('roomId').value;
+    roomRef = db.ref("rooms/"+roomId);
+    pc = new RTCPeerConnection(servers);
+
+    // DataChannel
+    channel = pc.createDataChannel("chat");
+    channel.onmessage = e => addMsg("對方: " + e.data);
+
+    // ICE candidate 上傳
+    pc.onicecandidate = e => {
+      if (e.candidate) roomRef.child("callerCandidates").push(JSON.stringify(e.candidate));
+    };
+
+    // 建立 Offer
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await roomRef.set({ offer: JSON.stringify(offer) });
+
+    // 等待 Answer
+    roomRef.child("answer").on("value", async snap => {
+      if (snap.val() && !pc.currentRemoteDescription) {
+        const answer = JSON.parse(snap.val());
+        await pc.setRemoteDescription(answer);
+      }
+    });
+
+    // 對方 ICE
+    roomRef.child("calleeCandidates").on("child_added", snap => {
+      pc.addIceCandidate(JSON.parse(snap.val()));
+    });
+  }
+
+  async function joinRoom() {
+    const roomId = document.getElementById('roomId').value;
+    roomRef = db.ref("rooms/"+roomId);
+    pc = new RTCPeerConnection(servers);
+
+    // 接收 DataChannel
+    pc.ondatachannel = e => {
+      channel = e.channel;
+      channel.onmessage = ev => addMsg("對方: " + ev.data);
+    };
+
+    // ICE candidate 上傳
+    pc.onicecandidate = e => {
+      if (e.candidate) roomRef.child("calleeCandidates").push(JSON.stringify(e.candidate));
+    };
+
+    // 讀取 Offer
+    const roomData = (await roomRef.get()).val();
+    const offer = JSON.parse(roomData.offer);
+    await pc.setRemoteDescription(offer);
+
+    // 建立 Answer
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await roomRef.child("answer").set(JSON.stringify(answer));
+
+    // 對方 ICE
+    roomRef.child("callerCandidates").on("child_added", snap => {
+      pc.addIceCandidate(JSON.parse(snap.val()));
+    });
+  }
+
+  function sendMsg() {
+    const text = document.getElementById("msg").value;
+    channel.send(text);
+    addMsg("我: " + text);
+    document.getElementById("msg").value = "";
+  }
+
+  function addMsg(text) {
+    const div = document.getElementById("chat");
+    div.innerHTML += "<div>"+text+"</div>";
+    div.scrollTop = div.scrollHeight;
+  }
+</script>
+</body>
+</html>
