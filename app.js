@@ -28,7 +28,6 @@ const log = (msg) => {
 
 // ===== UI 控制 =====
 function showInRoomUI(roomId, showQR) {
-function showInRoomUI(roomId) {
   document.getElementById("createSection").style.display = "none";
   document.getElementById("joinSection").style.display = "none";
   document.getElementById("leaveSection").style.display = "block";
