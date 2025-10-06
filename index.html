@@ -550,7 +550,51 @@
       max-height: 200px;
       overflow-y: auto;
     }
+  .chat-input-area {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
 
+    .chat-input-area input[type="text"] {
+      flex: 1;
+      border-radius: 20px;
+    }
+
+    .image-btn {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 50%;
+      background: #f0f0f0;
+      cursor: pointer;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+
+    .image-btn:hover {
+      background: #e0e0e0;
+      transform: scale(1.1);
+    }
+
+    .message-image-container {
+      margin-top: 5px;
+    }
+
+    .message-image {
+      max-width: 300px;
+      max-height: 300px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 0.3s ease;
+    }
+
+    .message-image:hover {
+      transform: scale(1.05);
+    }
     @media (max-width: 768px) {
       .main-content {
         grid-template-columns: 1fr;
@@ -813,6 +857,7 @@
   <script type="module" src="app.js"></script>
 </body>
 </html>
+
 
 
 
