@@ -79,6 +79,7 @@ function showMemberList() {
   get(ref(db, "rooms/" + currentRoomId)).then(snapshot => {
     const roomData = snapshot.val();
     const hostId = roomData?.hostId;
+    const isCurrentUserHost = hostId === currentUserId;
     
     // 排序成員：Host 第一，其他按加入時間
     const sortedMembers = Object.entries(currentMembers).sort(([idA, dataA], [idB, dataB]) => {
@@ -96,22 +97,158 @@ function showMemberList() {
       const name = memberData.name || "使用者" + memberId.substring(0, 4);
       const initial = name.charAt(0).toUpperCase();
       
+      // 房主操作按鈕（只有當前用戶是房主且目標不是自己時顯示）
+      let actionButtons = '';
+      if (isCurrentUserHost && !isMe) {
+        actionButtons = `
+          <div class="member-actions">
+            <button class="action-btn transfer-btn" data-member-id="${memberId}" data-member-name="${name}" title="轉交房主">
+              👑
+            </button>
+            <button class="action-btn kick-btn" data-member-id="${memberId}" data-member-name="${name}" title="踢除成員">
+              🚫
+            </button>
+          </div>
+        `;
+      }
+      
       memberItem.innerHTML = `
         <div class="member-info">
           <div class="member-avatar">${initial}</div>
           <span class="member-name">${name}</span>
         </div>
-        <div>
+        <div style="display: flex; align-items: center; gap: 10px;">
           ${isHost ? '<span class="member-badge">👑 房主</span>' : ''}
           ${isMe ? '<span class="you-badge">我</span>' : ''}
+          ${actionButtons}
         </div>
       `;
       
       memberList.appendChild(memberItem);
     });
+    
+    // 綁定轉交房主事件
+    document.querySelectorAll('.transfer-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const memberId = btn.dataset.memberId;
+        const memberName = btn.dataset.memberName;
+        
+        if (confirm(`確定要將房主轉交給 ${memberName} 嗎？`)) {
+          await transferHost(memberId);
+        }
+      };
+    });
+    
+    // 綁定踢除成員事件
+    document.querySelectorAll('.kick-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const memberId = btn.dataset.memberId;
+        const memberName = btn.dataset.memberName;
+        
+        if (confirm(`確定要踢除 ${memberName} 嗎？`)) {
+          await kickMember(memberId);
+        }
+      };
+    });
   });
   
   modal.classList.remove("hidden");
+}
+
+// 轉交房主
+async function transferHost(newHostId) {
+  if (!currentRoomId) return;
+  
+  try {
+    const roomRef = ref(db, "rooms/" + currentRoomId);
+    const snapshot = await get(roomRef);
+    
+    if (!snapshot.exists()) {
+      log("❌ 房間不存在");
+      return;
+    }
+    
+    const roomData = snapshot.val();
+    
+    // 確認當前用戶是房主
+    if (roomData.hostId !== currentUserId) {
+      log("❌ 只有房主可以轉交房主權限");
+      return;
+    }
+    
+    // 確認新房主在房間內
+    if (!roomData.members || !roomData.members[newHostId]) {
+      log("❌ 該成員不在房間內");
+      return;
+    }
+    
+    // 更新房主
+    await update(roomRef, { hostId: newHostId });
+    
+    // 更新舊房主狀態
+    await update(ref(db, `rooms/${currentRoomId}/members/${currentUserId}`), {
+      isHost: false
+    });
+    
+    // 更新新房主狀態
+    await update(ref(db, `rooms/${currentRoomId}/members/${newHostId}`), {
+      isHost: true
+    });
+    
+    const newHostName = roomData.members[newHostId].name || "使用者" + newHostId.substring(0, 4);
+    log(`👑 已將房主轉交給: ${newHostName}`);
+    
+    // 重新載入成員列表
+    showMemberList();
+  } catch (err) {
+    log("❌ 轉交房主失敗: " + err.message);
+  }
+}
+
+// 踢除成員
+async function kickMember(memberId) {
+  if (!currentRoomId) return;
+  
+  try {
+    const roomRef = ref(db, "rooms/" + currentRoomId);
+    const snapshot = await get(roomRef);
+    
+    if (!snapshot.exists()) {
+      log("❌ 房間不存在");
+      return;
+    }
+    
+    const roomData = snapshot.val();
+    
+    // 確認當前用戶是房主
+    if (roomData.hostId !== currentUserId) {
+      log("❌ 只有房主可以踢除成員");
+      return;
+    }
+    
+    // 不能踢除自己
+    if (memberId === currentUserId) {
+      log("❌ 不能踢除自己");
+      return;
+    }
+    
+    // 移除成員
+    await remove(ref(db, `rooms/${currentRoomId}/members/${memberId}`));
+    
+    // 關閉與該成員的連接
+    if (peerConnections[memberId]) {
+      peerConnections[memberId].close();
+      delete peerConnections[memberId];
+    }
+    
+    const memberName = roomData.members[memberId]?.name || "使用者" + memberId.substring(0, 4);
+    log(`🚫 已踢除成員: ${memberName}`);
+    
+    // 重新載入成員列表
+    showMemberList();
+  } catch (err) {
+    log("❌ 踢除成員失敗: " + err.message);
+  }
 }
 
 function hideMemberList() {
