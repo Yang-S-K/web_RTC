@@ -165,18 +165,15 @@ async function createPeerConnection(peerId, isInitiator) {
     if (!signal) return;
 
     try {
-      if (signal.offer && (!pc.currentRemoteDescription || pc.signalingState === 'stable')) {
-        await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
+      if (signal && signal.type === 'offer' && (!pc.currentRemoteDescription || pc.signalingState === 'stable')) {
+        await pc.setRemoteDescription(signal);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         // 已修正：移除 .toJSON()
-        await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), {
-          answer: answer,
-          timestamp: Date.now()
-        });
+        await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), answer);
         log(`📡 已回應 ${peerId} 的連接請求`);
-      } else if (signal.answer && pc.signalingState === 'have-local-offer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+      } else if (signal && signal.type === 'answer' && pc.signalingState === 'have-local-offer') {
+         await pc.setRemoteDescription(signal);
         log(`✅ 已接收 ${peerId} 的回應`);
       }
     } catch (err) {
@@ -206,10 +203,7 @@ async function createPeerConnection(peerId, isInitiator) {
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/offer`), {
-        offer: offer,
-        timestamp: Date.now()
-      });
+      await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/offer`), offer);
       log(`📡 已發送連接請求給 ${peerId}`);
     } catch (err) {
       console.error('創建 offer 失敗:', err);
@@ -326,9 +320,11 @@ function completeFileReceive(transferId) {
 }
 
 // ===== 檔案發送 =====
-async function sendFile(file) {
-  if (Object.keys(dataChannels).length === 0) {
-    alert('沒有可用的連接，請等待其他成員加入');
+async function sendFile(file, targetPeerId) {
+  const channel = dataChannels[targetPeerId];
+  
+  if (!channel || channel.readyState !== 'open') {
+    alert('與該成員的連接未建立');
     return;
   }
 
@@ -342,29 +338,23 @@ async function sendFile(file) {
     fileType: file.type,
     totalChunks: totalChunks,
     currentChunk: 0,
-    isSending: true
+    isSending: true,
+    targetPeerId: targetPeerId
   };
 
   addFileToList(transferId, file.name, file.size, currentUserId, true);
-  log(`📤 開始發送檔案: ${file.name} (${formatFileSize(file.size)})`);
+  
+  // 只向指定的 peer 發送
+  channel.send(JSON.stringify({
+    type: 'file-meta',
+    transferId: transferId,
+    fileName: file.name,
+    fileSize: file.size,
+    fileType: file.type,
+    totalChunks: totalChunks
+  }));
 
-  // 向所有連接的peers發送檔案元數據
-  for (const peerId in dataChannels) {
-    const channel = dataChannels[peerId];
-    if (channel && channel.readyState === 'open') {
-      channel.send(JSON.stringify({
-        type: 'file-meta',
-        transferId: transferId,
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.type,
-        totalChunks: totalChunks
-      }));
-
-      // 開始發送chunks
-      setTimeout(() => sendNextChunk(transferId, peerId), 100);
-    }
-  }
+  setTimeout(() => sendNextChunk(transferId, targetPeerId), 100);
 }
 
 function sendNextChunk(transferId, peerId) {
@@ -404,7 +394,42 @@ function sendNextChunk(transferId, peerId) {
 
   reader.readAsArrayBuffer(chunk);
 }
+function showMemberSelectForFile(file) {
+  const modal = document.getElementById("memberModal");
+  const memberList = document.getElementById("memberList");
+  
+  memberList.innerHTML = "<h3>選擇傳送對象：</h3>";
+  
+  Object.entries(currentMembers).forEach(([memberId, memberData]) => {
+    if (memberId === currentUserId) return; // 不顯示自己
+    
+    const name = memberData.name || "使用者" + memberId.substring(0, 4);
+    const btn = document.createElement("button");
+    btn.className = "member-item";
+    btn.style.cursor = "pointer";
+    btn.innerHTML = `<span>${name}</span>`;
+    btn.onclick = () => {
+      sendFile(file, memberId);
+      modal.classList.add("hidden");
+    };
+    memberList.appendChild(btn);
+  });
+  
+  modal.classList.remove("hidden");
+}
 
+// 修改檔案選擇事件
+fileInput.addEventListener('change', (e) => {
+  const files = e.target.files;
+  if (files.length > 0) {
+    if (Object.keys(dataChannels).length === 0) {
+      alert('沒有可用的連接');
+      return;
+    }
+    showMemberSelectForFile(files[0]); // 一次只處理一個檔案
+  }
+  fileInput.value = '';
+});
 // ===== UI 檔案列表管理 =====
 function addFileToList(transferId, fileName, fileSize, userId, isSending) {
   const fileList = document.getElementById('fileList');
