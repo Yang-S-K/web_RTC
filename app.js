@@ -394,6 +394,86 @@ function sendNextChunk(transferId, peerId) {
 
   reader.readAsArrayBuffer(chunk);
 }
+// ===== 檔案選擇處理 =====
+function showMemberSelectForFile(file) {
+  const modal = document.getElementById("memberModal");
+  const memberList = document.getElementById("memberList");
+  
+  memberList.innerHTML = "<h3 style='color: #667eea; margin-bottom: 15px;'>選擇傳送對象：</h3>";
+  
+  const members = Object.entries(currentMembers).filter(([id]) => id !== currentUserId);
+  
+  if (members.length === 0) {
+    memberList.innerHTML += "<p style='color: #999; text-align: center;'>目前沒有其他成員</p>";
+    modal.classList.remove("hidden");
+    return;
+  }
+  
+  members.forEach(([memberId, memberData]) => {
+    const name = memberData.name || "使用者" + memberId.substring(0, 4);
+    const memberItem = document.createElement("div");
+    memberItem.className = "member-item";
+    memberItem.style.cursor = "pointer";
+    memberItem.innerHTML = `
+      <div class="member-info">
+        <div class="member-avatar">${name.charAt(0).toUpperCase()}</div>
+        <span class="member-name">${name}</span>
+      </div>
+      <span style="color: #667eea;">➤</span>
+    `;
+    memberItem.onclick = () => {
+      sendFile(file, memberId);
+      modal.classList.add("hidden");
+    };
+    memberList.appendChild(memberItem);
+  });
+  
+  modal.classList.remove("hidden");
+}
+
+// 檔案選擇事件
+const fileInput = document.getElementById('fileInput');
+const dropZone = document.getElementById('fileDropZone');
+
+fileInput.addEventListener('change', (e) => {
+  const files = e.target.files;
+  if (files.length > 0) {
+    if (Object.keys(dataChannels).length === 0) {
+      alert('目前沒有其他成員在房間內');
+      return;
+    }
+    showMemberSelectForFile(files[0]);
+  }
+  fileInput.value = '';
+});
+
+dropZone.addEventListener('click', () => {
+  fileInput.click();
+});
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragover');
+});
+
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  
+  const files = e.dataTransfer.files;
+  if (files.length > 0) {
+    if (Object.keys(dataChannels).length === 0) {
+      alert('目前沒有其他成員在房間內');
+      return;
+    }
+    showMemberSelectForFile(files[0]);
+  }
+});
+
 function showMemberSelectForFile(file) {
   const modal = document.getElementById("memberModal");
   const memberList = document.getElementById("memberList");
@@ -996,44 +1076,6 @@ function stopScreenShare() {
   log("⏹️ 停止分享螢幕");
 }
 
-// ===== 檔案選擇處理 =====
-const fileInput = document.getElementById('fileInput');
-const dropZone = document.getElementById('fileDropZone');
-
-fileInput.addEventListener('change', (e) => {
-  const files = e.target.files;
-  if (files.length > 0) {
-    Array.from(files).forEach(file => {
-      sendFile(file);
-    });
-  }
-  fileInput.value = ''; // 重置input
-});
-
-dropZone.addEventListener('click', () => {
-  fileInput.click();
-});
-
-dropZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropZone.classList.add('dragover');
-});
-
-dropZone.addEventListener('dragleave', () => {
-  dropZone.classList.remove('dragover');
-});
-
-dropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('dragover');
-  
-  const files = e.dataTransfer.files;
-  if (files.length > 0) {
-    Array.from(files).forEach(file => {
-      sendFile(file);
-    });
-  }
-});
 
 // ===== 成員相關事件 =====
 document.getElementById("memberCount").onclick = () => {
