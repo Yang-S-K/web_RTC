@@ -137,12 +137,12 @@ async function createPeerConnection(peerId, isInitiator) {
     };
   }
 
-  // ICE 候選
+  // ICE 候選 - 已修正：移除 .toJSON()
   pc.onicecandidate = (event) => {
     if (event.candidate) {
       const candidateRef = ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/candidates/${Date.now()}`);
       set(candidateRef, {
-        candidate: event.candidate.toJSON(),
+        candidate: event.candidate,
         timestamp: Date.now()
       }).catch(err => console.error('發送 ICE candidate 失敗:', err));
     }
@@ -169,8 +169,9 @@ async function createPeerConnection(peerId, isInitiator) {
         await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        // 已修正：移除 .toJSON()
         await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), {
-          answer: answer.toJSON(),
+          answer: answer,
           timestamp: Date.now()
         });
         log(`📡 已回應 ${peerId} 的連接請求`);
@@ -200,13 +201,13 @@ async function createPeerConnection(peerId, isInitiator) {
     }
   });
 
-  // 如果是發起者，創建 offer
+  // 如果是發起者，創建 offer - 已修正：移除 .toJSON()
   if (isInitiator) {
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/offer`), {
-        offer: offer.toJSON(),
+        offer: offer,
         timestamp: Date.now()
       });
       log(`📡 已發送連接請求給 ${peerId}`);
