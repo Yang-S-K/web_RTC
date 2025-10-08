@@ -1,7 +1,7 @@
 // js/chat.js
 import { db } from "./firebase.js";
 import {
-  ref, set, onValue, serverTimestamp, push,
+  ref, set, serverTimestamp, push, onChildAdded, off
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 import { getCurrentRoomId, getCurrentUserId, getCurrentUserName } from "./webrtc.js";
@@ -21,10 +21,14 @@ export function displayMessage(sender, text, isLocal = false) {
   `;
 
   chat.appendChild(msgDiv);
-  chat.scrollTop = chat.scrollHeight;
+
+  // 自動捲到最底，但只在使用者本來就在底部時才自動捲動
+  if (chat.scrollHeight - chat.scrollTop - chat.clientHeight < 50) {
+    chat.scrollTop = chat.scrollHeight;
+  }
 }
 
-// ===== 清空訊息（重新進房或被踢出時用）=====
+// ===== 清空訊息 =====
 export function clearChatMessages() {
   const chat = document.getElementById("chatMessages");
   if (chat) {
@@ -34,6 +38,10 @@ export function clearChatMessages() {
         <div>歡迎來到聊天室！</div>
       </div>`;
   }
+  if (messagesListener) {
+    off(messagesListener); // 停止監聽
+    messagesListener = null;
+  }
 }
 
 // ===== 初始化聊天室監聽 =====
@@ -41,19 +49,19 @@ export function initChatListener() {
   const roomId = getCurrentRoomId();
   if (!roomId) return;
 
-  if (messagesListener) messagesListener();
+  // 清除舊監聽
+  if (messagesListener) {
+    off(messagesListener);
+    messagesListener = null;
+  }
 
-  messagesListener = onValue(ref(db, `rooms/${roomId}/messages`), (snapshot) => {
-    const messages = snapshot.val();
-    if (!messages) return;
+  const messagesRef = ref(db, `rooms/${roomId}/messages`);
+  messagesListener = messagesRef;
 
-    const chat = document.getElementById("chatMessages");
-    if (!chat) return;
-
-    chat.innerHTML = ""; // 先清空
-    Object.values(messages).forEach((msg) => {
-      displayMessage(msg.senderName, msg.text, msg.senderId === getCurrentUserId());
-    });
+  onChildAdded(messagesRef, (snapshot) => {
+    const msg = snapshot.val();
+    if (!msg) return;
+    displayMessage(msg.senderName, msg.text, msg.senderId === getCurrentUserId());
   });
 }
 
