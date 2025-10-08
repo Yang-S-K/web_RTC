@@ -396,8 +396,8 @@ export async function createRoom() {
 
   setupMemberConnections();
 
-  const roomUrl = ui.getRoomShareUrl(currentRoomId, PUBLIC_BASE_URL);
-  ui.updateBrowserUrl(currentRoomId, PUBLIC_BASE_URL);
+  const roomUrl = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+  ui.updateRoomLinkUI(roomUrl);
 
   ui.showInRoomUI(currentRoomId);
   ui.updateRoomLinkUI(roomUrl);
@@ -439,8 +439,8 @@ export async function joinRoom(roomId) {
     if (hostId === currentUserId) ui.log("🎯 你成為新的 Host！");
   });
 
-  const roomUrl = ui.getRoomShareUrl(roomId, PUBLIC_BASE_URL);
-  ui.updateBrowserUrl(roomId, PUBLIC_BASE_URL);
+  const roomUrl = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+  ui.updateRoomLinkUI(roomUrl);
 
   ui.showInRoomUI(roomId);
   ui.updateRoomLinkUI(roomUrl);
