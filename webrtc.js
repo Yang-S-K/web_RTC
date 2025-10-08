@@ -397,10 +397,10 @@ export async function createRoom() {
   setupMemberConnections();
 
   const roomUrl = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
-  ui.updateRoomLinkUI(roomUrl);
+  console.log("👉 呼叫 updateRoomLinkUI:", roomUrl);
+  updateRoomLinkUI(roomUrl);
 
   ui.showInRoomUI(currentRoomId);
-  ui.updateRoomLinkUI(roomUrl);
   ui.initChatListener();
 
   ui.log("🎯 你是 Host");
@@ -434,19 +434,21 @@ export async function joinRoom(roomId) {
 
   setupMemberConnections();
 
+  const roomUrl = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+  console.log("👉 呼叫 updateRoomLinkUI:", roomUrl);
+  updateRoomLinkUI(roomUrl);
+
+  ui.showInRoomUI(roomId);
+  ui.initChatListener();
+
+  ui.log("✅ 加入房間: " + roomId);
+
+  // 監看 hostId 變化
   hostListener = onValue(ref(db, `rooms/${currentRoomId}/hostId`), (snapshot) => {
     const hostId = snapshot.val();
     if (hostId === currentUserId) ui.log("🎯 你成為新的 Host！");
   });
 
-  const roomUrl = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
-  ui.updateRoomLinkUI(roomUrl);
-
-  ui.showInRoomUI(roomId);
-  ui.updateRoomLinkUI(roomUrl);
-  ui.initChatListener();
-
-  ui.log("✅ 加入房間: " + roomId);
   return currentRoomId;
 }
 
