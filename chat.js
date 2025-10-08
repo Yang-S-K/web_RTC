@@ -78,5 +78,5 @@ export async function sendMessage(text) {
     timestamp: serverTimestamp(),
   });
 
-  displayMessage(getCurrentUserName(), text, true);
+  // displayMessage(getCurrentUserName(), text, true);
 }
