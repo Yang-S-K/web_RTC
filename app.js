@@ -507,21 +507,40 @@ function sendNextChunk(transferId, peerId) {
   reader.readAsArrayBuffer(chunk);
 }
 // ===== 檔案選擇處理 =====
+function getOtherMembers() {
+  return Object.entries(currentMembers).filter(([id]) => id !== currentUserId);
+}
+
+function getConnectedMembers() {
+  return getOtherMembers().filter(([memberId]) => {
+    const channel = dataChannels[memberId];
+    return channel && channel.readyState === 'open';
+  });
+}
+
 function showMemberSelectForFile(file) {
   const modal = document.getElementById("memberModal");
   const memberList = document.getElementById("memberList");
   
   memberList.innerHTML = "<h3 style='color: #667eea; margin-bottom: 15px;'>選擇傳送對象：</h3>";
   
-  const members = Object.entries(currentMembers).filter(([id]) => id !== currentUserId);
-  
-  if (members.length === 0) {
+  const otherMembers = getOtherMembers();
+
+  if (otherMembers.length === 0) {
     memberList.innerHTML += "<p style='color: #999; text-align: center;'>目前沒有其他成員</p>";
     modal.classList.remove("hidden");
     return;
   }
   
-  members.forEach(([memberId, memberData]) => {
+  const availableMembers = getConnectedMembers();
+
+  if (availableMembers.length === 0) {
+    memberList.innerHTML += "<p style='color: #999; text-align: center;'>與其他成員的連接尚未建立，請稍後再試</p>";
+    modal.classList.remove("hidden");
+    return;
+  }
+
+  availableMembers.forEach(([memberId, memberData]) => {
     const name = memberData.name || "使用者" + memberId.substring(0, 4);
     const memberItem = document.createElement("div");
     memberItem.className = "member-item";
@@ -548,13 +567,9 @@ const fileInput = document.getElementById('fileInput');
 const dropZone = document.getElementById('fileDropZone');
 
 fileInput.addEventListener('change', (e) => {
-  isFileDialogOpen = false;  
+  isFileDialogOpen = false;
   const files = e.target.files;
   if (files.length > 0) {
-    if (Object.keys(dataChannels).length === 0) {
-      alert('目前沒有其他成員在房間內');
-      return;
-    }
     showMemberSelectForFile(files[0]);
   }
   fileInput.value = '';
@@ -585,10 +600,6 @@ dropZone.addEventListener('drop', (e) => {
   
   const files = e.dataTransfer.files;
   if (files.length > 0) {
-    if (Object.keys(dataChannels).length === 0) {
-      alert('目前沒有其他成員在房間內');
-      return;
-    }
     showMemberSelectForFile(files[0]);
   }
 });
