@@ -1,7 +1,7 @@
-// js/main.js
 import { db } from "./firebase.js";
 import { createRoom, joinRoom, leaveRoom, shareRoomLink } from "./webrtc.js";
 import { initChatListener, sendMessage, clearChatMessages } from "./chat.js";
+import { log } from "./ui.js";
 
 // ========== 全域變數 ==========
 export let currentRoomId = null;
