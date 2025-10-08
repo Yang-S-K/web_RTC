@@ -474,42 +474,7 @@ dropZone.addEventListener('drop', (e) => {
   }
 });
 
-function showMemberSelectForFile(file) {
-  const modal = document.getElementById("memberModal");
-  const memberList = document.getElementById("memberList");
-  
-  memberList.innerHTML = "<h3>選擇傳送對象：</h3>";
-  
-  Object.entries(currentMembers).forEach(([memberId, memberData]) => {
-    if (memberId === currentUserId) return; // 不顯示自己
-    
-    const name = memberData.name || "使用者" + memberId.substring(0, 4);
-    const btn = document.createElement("button");
-    btn.className = "member-item";
-    btn.style.cursor = "pointer";
-    btn.innerHTML = `<span>${name}</span>`;
-    btn.onclick = () => {
-      sendFile(file, memberId);
-      modal.classList.add("hidden");
-    };
-    memberList.appendChild(btn);
-  });
-  
-  modal.classList.remove("hidden");
-}
 
-// 修改檔案選擇事件
-fileInput.addEventListener('change', (e) => {
-  const files = e.target.files;
-  if (files.length > 0) {
-    if (Object.keys(dataChannels).length === 0) {
-      alert('沒有可用的連接');
-      return;
-    }
-    showMemberSelectForFile(files[0]); // 一次只處理一個檔案
-  }
-  fileInput.value = '';
-});
 // ===== UI 檔案列表管理 =====
 function addFileToList(transferId, fileName, fileSize, userId, isSending) {
   const fileList = document.getElementById('fileList');
