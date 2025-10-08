@@ -14,6 +14,8 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+const PUBLIC_BASE_URL = "https://yang-s-k.github.io/web_RTC/";
+
 let currentRoomId = null;
 let currentUserId = Math.random().toString(36).substring(2, 10);
 let currentUserName = "使用者" + currentUserId.substring(0, 4);
@@ -65,6 +67,24 @@ function updateRoomLinkUI(url) {
     QRCode.toCanvas(canvas, url, (err) => {
       if (err) log("❌ QR Code 生成失敗");
     });
+  }
+}
+
+function getRoomShareUrl(roomId) {
+  const publicUrl = new URL(PUBLIC_BASE_URL);
+  publicUrl.searchParams.set("room", roomId);
+  return publicUrl.toString();
+}
+
+function updateBrowserUrl(roomId) {
+  const publicUrl = new URL(PUBLIC_BASE_URL);
+  publicUrl.searchParams.set("room", roomId);
+
+  if (window.location.origin === publicUrl.origin) {
+    const newPath = publicUrl.pathname + publicUrl.search;
+    history.replaceState(null, "", newPath);
+  } else {
+    history.replaceState(null, "", `${window.location.pathname}?room=${roomId}`);
   }
 }
 
@@ -164,16 +184,18 @@ async function createPeerConnection(peerId, isInitiator) {
     const signal = snapshot.val();
     if (!signal) return;
 
+    const offer = signal.offer;
+    const answer = signal.answer;
+    
     try {
-      if (signal && signal.type === 'offer' && (!pc.currentRemoteDescription || pc.signalingState === 'stable')) {
-        await pc.setRemoteDescription(signal);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        // 已修正：移除 .toJSON()
-        await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), answer);
+      if (offer && (!pc.currentRemoteDescription || pc.currentRemoteDescription.type !== 'offer')) {
+        await pc.setRemoteDescription(offer);
+        const answerDesc = await pc.createAnswer();
+        await pc.setLocalDescription(answerDesc);
+        await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), answerDesc);
         log(`📡 已回應 ${peerId} 的連接請求`);
-      } else if (signal && signal.type === 'answer' && pc.signalingState === 'have-local-offer') {
-         await pc.setRemoteDescription(signal);
+      } else if (answer && pc.signalingState === 'have-local-offer') {
+        await pc.setRemoteDescription(answer);
         log(`✅ 已接收 ${peerId} 的回應`);
       }
     } catch (err) {
@@ -704,10 +726,13 @@ async function kickMember(memberId) {
 function hideMemberList() {
   document.getElementById("memberModal").classList.add("hidden");
 }
-
 // ===== 監聽成員變化並建立連接 =====
 function setupMemberConnections() {
-  onValue(ref(db, "rooms/" + currentRoomId + "/members"), async (snapshot) => {
+  if (membersListener) {
+    membersListener();
+  }
+
+  membersListener = onValue(ref(db, "rooms/" + currentRoomId + "/members"), async (snapshot) => {
     const members = snapshot.val();
     if (!members) return;
 
@@ -760,10 +785,11 @@ document.getElementById("createRoomBtn").onclick = async () => {
 
   setupMemberConnections();
 
-  const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+  const roomUrl = getRoomShareUrl(currentRoomId);
+  updateBrowserUrl(currentRoomId);
   
   showInRoomUI(currentRoomId);
-  updateRoomLinkUI(url);
+  updateRoomLinkUI(roomUrl);
   initChatListener();
 
   log("🎯 你是 Host");
@@ -774,7 +800,7 @@ document.getElementById("createRoomBtn").onclick = async () => {
 document.getElementById("shareBtn").onclick = async () => {
   if (!currentRoomId) return;
   
-  const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+  const url = getRoomShareUrl(currentRoomId);
   
   if (navigator.share) {
     try {
@@ -832,10 +858,11 @@ async function joinRoom(roomId) {
     }
   });
 
-  const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+  const roomUrl = getRoomShareUrl(roomId);
+  updateBrowserUrl(roomId);
   
   showInRoomUI(roomId);
-  updateRoomLinkUI(url);
+  updateRoomLinkUI(roomUrl);
   initChatListener();
   
   log("✅ 加入房間: " + roomId);
