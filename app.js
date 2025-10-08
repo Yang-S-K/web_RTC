@@ -279,7 +279,10 @@ async function createPeerConnection(peerId, isInitiator) {
         state.lastProcessedOfferSdp = offer.sdp;        
         const answerDesc = await pc.createAnswer();
         await pc.setLocalDescription(answerDesc);
-        await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), answerDesc);
+        await set(
+          ref(db, `rooms/${currentRoomId}/signals/${peerId}_to_${currentUserId}/answer`),
+          answerDesc
+        );
         log(`📡 已回應 ${peerId} 的連接請求`);
       } else if (answer?.sdp) {
         await applyRemoteAnswer(peerId, answer);
