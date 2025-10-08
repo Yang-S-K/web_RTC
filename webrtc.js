@@ -403,6 +403,8 @@ export async function createRoom() {
   ui.showInRoomUI(currentRoomId);
   ui.initChatListener();
 
+  ui.updateBrowserUrl(currentRoomId);
+
   ui.log("🎯 你是 Host");
   ui.log("✅ 建立房間: " + currentRoomId);
 
@@ -440,6 +442,8 @@ export async function joinRoom(roomId) {
 
   ui.showInRoomUI(roomId);
   ui.initChatListener();
+
+  ui.updateBrowserUrl(currentRoomId);
 
   ui.log("✅ 加入房間: " + roomId);
 
