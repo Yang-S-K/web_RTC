@@ -26,6 +26,79 @@ let hostListener = null;
 let currentMembers = {};
 let messagesListener = null;
 let screenStream = null;
+let peerSignalStates = {};
+let peerSignalSubscriptions = {};
+let isFileDialogOpen = false;
+
+function cleanupPeer(peerId) {
+  const pc = peerConnections[peerId];
+  if (pc) {
+    try {
+      pc.close();
+    } catch (err) {
+      console.error('關閉 PeerConnection 失敗:', err);
+    }
+    delete peerConnections[peerId];
+  }
+
+  if (dataChannels[peerId]) {
+    delete dataChannels[peerId];
+  }
+
+  const subscriptions = peerSignalSubscriptions[peerId];
+  if (subscriptions) {
+    if (typeof subscriptions.signal === 'function') {
+      subscriptions.signal();
+    }
+    if (typeof subscriptions.candidates === 'function') {
+      subscriptions.candidates();
+    }
+    delete peerSignalSubscriptions[peerId];
+  }
+
+  if (peerSignalStates[peerId]) {
+    delete peerSignalStates[peerId];
+  }
+}
+
+async function applyRemoteAnswer(peerId, answer) {
+  const pc = peerConnections[peerId];
+  const state = peerSignalStates[peerId];
+
+  if (!pc || !state || !answer?.sdp) {
+    return false;
+  }
+
+  if (state.lastProcessedAnswerSdp === answer.sdp) {
+    return false;
+  }
+
+  if (!pc.localDescription || pc.localDescription.type !== 'offer') {
+    if (!state.pendingAnswer || state.pendingAnswer.sdp !== answer.sdp) {
+      state.pendingAnswer = answer;
+    }
+    return false;
+  }
+
+  await pc.setRemoteDescription(answer);
+  state.lastProcessedAnswerSdp = answer.sdp;
+  state.pendingAnswer = null;
+  log(`✅ 已接收 ${peerId} 的回應`);
+  return true;
+}
+
+async function maybeApplyPendingAnswer(peerId) {
+  const state = peerSignalStates[peerId];
+  if (!state || !state.pendingAnswer) {
+    return;
+  }
+
+  try {
+    await applyRemoteAnswer(peerId, state.pendingAnswer);
+  } catch (err) {
+    console.error('信號處理錯誤:', err);
+  }
+}
 
 // 檔案傳輸相關
 let fileTransfers = {}; // { transferId: { file, chunks, received, ... } }
@@ -118,10 +191,12 @@ function handleKickedOut() {
     messagesListener = null;
   }
 
-  Object.values(peerConnections).forEach(pc => pc.close());
+  Object.keys(peerConnections).forEach(cleanupPeer);
   peerConnections = {};
   dataChannels = {};
-
+  peerSignalSubscriptions = {};
+  peerSignalStates = {};
+  
   if (screenStream) {
     stopScreenShare();
   }
@@ -141,7 +216,18 @@ function handleKickedOut() {
 async function createPeerConnection(peerId, isInitiator) {
   const pc = new RTCPeerConnection(configuration);
   peerConnections[peerId] = pc;
+  peerSignalStates[peerId] = {
+    lastProcessedOfferSdp: null,
+    lastProcessedAnswerSdp: null,
+    pendingAnswer: null
+  };
 
+  if (peerSignalSubscriptions[peerId]) {
+    peerSignalSubscriptions[peerId].signal?.();
+    peerSignalSubscriptions[peerId].candidates?.();
+  }
+  peerSignalSubscriptions[peerId] = {};
+  
   // 創建 DataChannel
   if (isInitiator) {
     const channel = pc.createDataChannel("fileTransfer");
@@ -171,36 +257,32 @@ async function createPeerConnection(peerId, isInitiator) {
   // 連接狀態監控
   pc.onconnectionstatechange = () => {
     log(`🔗 與 ${peerId} 的連接狀態: ${pc.connectionState}`);
-    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-      pc.close();
-      delete peerConnections[peerId];
-      delete dataChannels[peerId];
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      cleanupPeer(peerId);
     }
   };
 
   // 監聽來自對方的信號
   const signalRef = ref(db, `rooms/${currentRoomId}/signals/${peerId}_to_${currentUserId}`);
-  onValue(signalRef, async (snapshot) => {
+  peerSignalSubscriptions[peerId].signal = onValue(signalRef, async (snapshot) => {
     const signal = snapshot.val();
     if (!signal) return;
 
     const offer = signal.offer;
     const answer = signal.answer;
+    const state = peerSignalStates[peerId];
+    if (!state) return;
     
     try {
-      if (offer && (!pc.currentRemoteDescription || pc.currentRemoteDescription.type !== 'offer')) {
+      if (offer?.sdp && state.lastProcessedOfferSdp !== offer.sdp) {
         await pc.setRemoteDescription(offer);
+        state.lastProcessedOfferSdp = offer.sdp;        
         const answerDesc = await pc.createAnswer();
         await pc.setLocalDescription(answerDesc);
         await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), answerDesc);
         log(`📡 已回應 ${peerId} 的連接請求`);
-      } else if (
-        answer &&
-        pc.signalingState === 'have-local-offer' &&
-        !pc.currentRemoteDescription
-      ) {
-        await pc.setRemoteDescription(answer);
-        log(`✅ 已接收 ${peerId} 的回應`);
+      } else if (answer?.sdp) {
+        await applyRemoteAnswer(peerId, answer);
       }
     } catch (err) {
       console.error('信號處理錯誤:', err);
@@ -209,7 +291,7 @@ async function createPeerConnection(peerId, isInitiator) {
 
   // 監聽 ICE candidates
   const candidatesRef = ref(db, `rooms/${currentRoomId}/signals/${peerId}_to_${currentUserId}/candidates`);
-  onValue(candidatesRef, (snapshot) => {
+  peerSignalSubscriptions[peerId].candidates = onValue(candidatesRef, (snapshot) => {
     const candidates = snapshot.val();
     if (candidates) {
       Object.values(candidates).forEach(async (data) => {
@@ -229,7 +311,8 @@ async function createPeerConnection(peerId, isInitiator) {
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/offer`), offer);
+      await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}`), { offer });
+      await maybeApplyPendingAnswer(peerId);
       log(`📡 已發送連接請求給 ${peerId}`);
     } catch (err) {
       console.error('創建 offer 失敗:', err);
@@ -462,6 +545,7 @@ const fileInput = document.getElementById('fileInput');
 const dropZone = document.getElementById('fileDropZone');
 
 fileInput.addEventListener('change', (e) => {
+  isFileDialogOpen = false;  
   const files = e.target.files;
   if (files.length > 0) {
     if (Object.keys(dataChannels).length === 0) {
@@ -473,7 +557,13 @@ fileInput.addEventListener('change', (e) => {
   fileInput.value = '';
 });
 
+fileInput.addEventListener('cancel', () => {
+  isFileDialogOpen = false;
+});
+
 dropZone.addEventListener('click', () => {
+  if (isFileDialogOpen) return;
+  isFileDialogOpen = true;  
   fileInput.click();
 });
 
@@ -710,13 +800,7 @@ async function kickMember(memberId) {
     
     await remove(ref(db, `rooms/${currentRoomId}/members/${memberId}`));
     
-    if (peerConnections[memberId]) {
-      peerConnections[memberId].close();
-      delete peerConnections[memberId];
-    }
-    if (dataChannels[memberId]) {
-      delete dataChannels[memberId];
-    }
+    cleanupPeer(memberId);
     
     const memberName = roomData.members[memberId]?.name || "使用者" + memberId.substring(0, 4);
     log(`🚫 已踢除成員: ${memberName}`);
@@ -761,9 +845,7 @@ function setupMemberConnections() {
     // 清理已離開成員的連接
     for (const peerId in peerConnections) {
       if (!members[peerId]) {
-        peerConnections[peerId].close();
-        delete peerConnections[peerId];
-        delete dataChannels[peerId];
+        cleanupPeer(peerId);
       }
     }
   });
@@ -889,10 +971,12 @@ document.getElementById("leaveRoomBtn").onclick = async () => {
   hostListener = null;
   messagesListener = null;
 
-  Object.values(peerConnections).forEach(pc => pc.close());
+  Object.keys(peerConnections).forEach(cleanupPeer);
   peerConnections = {};
   dataChannels = {};
-
+  peerSignalSubscriptions = {};
+  peerSignalStates = {};
+  
   const roomRef = ref(db, "rooms/" + currentRoomId);
   const snap = await get(roomRef);
   
