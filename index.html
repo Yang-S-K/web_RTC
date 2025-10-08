@@ -781,27 +781,6 @@
       });
     });
 
-    // 檔案拖曳
-    const dropZone = document.getElementById('fileDropZone');
-    const fileInput = document.getElementById('fileInput');
-
-    dropZone.addEventListener('click', () => fileInput.click());
-
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.classList.add('dragover');
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.classList.remove('dragover');
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-      console.log('Files dropped:', e.dataTransfer.files);
-    });
-
     // 聊天輸入
     const chatInput = document.getElementById('chatInput');
     chatInput.addEventListener('keypress', (e) => {
@@ -815,6 +794,7 @@
   <script type="module" src="app.js"></script>
 </body>
 </html>
+
 
 
 
