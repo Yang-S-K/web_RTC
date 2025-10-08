@@ -54,14 +54,10 @@ export function updateMemberCount(n) {
 // ===== 更新房間連結與 QRCode =====
 export function updateRoomLinkUI(roomUrl) {
   const qrCanvas = document.getElementById("qrcode");
-  if (!qrCanvas) return;
+  if (!qrCanvas || typeof QRCode === "undefined") return;
 
-  try {
-    QRCode.toCanvas(qrCanvas, roomUrl, {
-      width: 200,
-      margin: 2,
-    });
-  } catch (err) {
-    console.error("生成 QRCode 失敗:", err);
-  }
+  QRCode.toCanvas(qrCanvas, roomUrl, (err) => {
+    if (err) console.error("生成 QRCode 失敗:", err);
+  });
 }
+
