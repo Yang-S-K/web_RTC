@@ -7,6 +7,7 @@ import { db } from "./firebase.js";
 import {
   ref, set, get, remove, onValue, update,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { log, showInRoomUI, resetUI, updateMemberCount, updateRoomLinkUI } from "./ui.js";
 
 // ===== 工具：UI hooks（若頁面已有自訂函式就用，否則 fallback） =====
 const ui = {
