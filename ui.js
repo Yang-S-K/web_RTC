@@ -51,6 +51,7 @@ export function updateMemberCount(n) {
 
 // ===== 更新房間連結與 QRCode =====
 export function updateRoomLinkUI(roomUrl) {
+  console.log("👉 updateRoomLinkUI 被呼叫了", roomUrl);
   console.log(window.QRCode);
   const qrCanvas = document.getElementById("qrcode");
   if (!qrCanvas) {
