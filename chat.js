@@ -9,24 +9,22 @@ import { getCurrentRoomId, getCurrentUserId, getCurrentUserName } from "./webrtc
 let messagesListener = null;
 
 // ===== 顯示訊息 =====
-export function displayMessage(sender, text, isLocal = false) {
-  const chat = document.getElementById("chatMessages");
-  if (!chat) return;
+export function displayMessage(msg) {
+  const chatMessages = document.getElementById("chatMessages");
+  const div = document.createElement("div");
+  div.classList.add("chat-message");
+  div.textContent = `${msg.senderName}: ${msg.text}`;
+  chatMessages.appendChild(div);
 
-  const msgDiv = document.createElement("div");
-  msgDiv.className = "message " + (isLocal ? "sent" : "received");
-  msgDiv.innerHTML = `
-    <div class="message-sender">${sender}</div>
-    <div>${text}</div>
-  `;
+  // ===== 自動滾動邏輯 =====
+  const isAtBottom =
+    chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 10;
 
-  chat.appendChild(msgDiv);
-
-  // 自動捲到最底，但只在使用者本來就在底部時才自動捲動
-  if (chat.scrollHeight - chat.scrollTop - chat.clientHeight < 50) {
-    chat.scrollTop = chat.scrollHeight;
+  if (isAtBottom) {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 }
+
 
 // ===== 清空訊息 =====
 export function clearChatMessages() {
