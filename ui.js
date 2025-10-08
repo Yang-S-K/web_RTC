@@ -1,6 +1,6 @@
 // js/ui.js
 // ✅ UI 控制（log、房間資訊、QRCode、成員數）
-import QRCode from "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.esm.js";
+import QRCode from "https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js";
 // ===== 日誌 =====
 export function log(msg) {
   console.log(msg);
