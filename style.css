@@ -216,7 +216,7 @@
     .message.sent {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      margin-left: 20px;
+      margin-left: auto;
     }
 
     .message.received {
@@ -236,7 +236,6 @@
      border-top: 1px solid #ccc;
      padding: 10px;
      background: #f9f9f9;
-     margin-right:20px;
    }
 
     .chat-input-area input {
