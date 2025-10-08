@@ -377,6 +377,7 @@ function handleKickedOut() {
 
 // ===== 建房 =====
 export async function createRoom() {
+  console.log("👉 createRoom 被呼叫了");
   currentRoomId = Math.random().toString(36).substring(2, 7);
 
   const roomData = {
