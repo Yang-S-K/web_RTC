@@ -194,7 +194,11 @@ async function createPeerConnection(peerId, isInitiator) {
         await pc.setLocalDescription(answerDesc);
         await set(ref(db, `rooms/${currentRoomId}/signals/${currentUserId}_to_${peerId}/answer`), answerDesc);
         log(`📡 已回應 ${peerId} 的連接請求`);
-      } else if (answer && pc.signalingState === 'have-local-offer') {
+      } else if (
+        answer &&
+        pc.signalingState === 'have-local-offer' &&
+        !pc.currentRemoteDescription
+      ) {
         await pc.setRemoteDescription(answer);
         log(`✅ 已接收 ${peerId} 的回應`);
       }
