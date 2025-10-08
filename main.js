@@ -1,7 +1,7 @@
 // main.js
 import { db } from "./firebase.js";
-import { createRoom, joinRoom, leaveRoom } from "./webrtc.js";
-import { initChatListener } from "./chat.js";
+import { createRoom, joinRoom, leaveRoom, shareRoomLink } from "./webrtc.js";
+import { initChatListener, sendMessage, clearChatMessages } from "./chat.js";
 import { log } from "./ui.js";
 
 // ========== 全域變數 ==========
@@ -9,25 +9,21 @@ export let currentRoomId = null;
 export let currentUserId = Math.random().toString(36).substring(2, 10);
 export let currentUserName = "使用者" + currentUserId.substring(0, 4);
 
-// ========== 按鈕事件綁定 ==========
-document.getElementById("createRoomBtn").onclick = async () => {
-  currentRoomId = await createRoom(currentUserId, currentUserName);
-  initChatListener();
-  log("🎯 你是 Host");
-};
+// 建立房間
+document.getElementById("createRoomBtn").onclick = () => { createRoom(); };
 
-document.getElementById("joinRoomBtn").onclick = async () => {
+// 加入房間
+document.getElementById("joinRoomBtn").onclick = () => {
   const roomId = document.getElementById("joinRoomId").value.trim();
   if (!roomId) return alert("請輸入房號");
-  currentRoomId = await joinRoom(roomId, currentUserId, currentUserName);
-  initChatListener();
+  joinRoom(roomId);
 };
 
-document.getElementById("leaveRoomBtn").onclick = async () => {
-  if (!currentRoomId) return;
-  await leaveRoom(currentRoomId, currentUserId);
-  currentRoomId = null;
-};
+// 離開房間
+document.getElementById("leaveRoomBtn").onclick = () => { leaveRoom(); };
+
+// 分享房間
+document.getElementById("shareBtn").onclick = () => { shareRoomLink(); };
 
 // ========== 自動加入房間 ==========
 window.addEventListener("load", () => {
@@ -37,3 +33,10 @@ window.addEventListener("load", () => {
     joinRoom(roomParam, currentUserId, currentUserName);
   }
 });
+
+document.getElementById("sendBtn").onclick = () => {
+  const input = document.getElementById("chatInput");
+  const text = input.value;
+  sendMessage(text);
+  input.value = "";
+};
