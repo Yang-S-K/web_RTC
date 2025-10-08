@@ -1,6 +1,6 @@
 // js/ui.js
 // ✅ UI 控制（log、房間資訊、QRCode、成員數）
-
+import QRCode from "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.esm.js";
 // ===== 日誌 =====
 export function log(msg) {
   console.log(msg);
@@ -54,15 +54,17 @@ export function updateMemberCount(n) {
 // ===== 更新房間連結與 QRCode =====
 export function updateRoomLinkUI(roomUrl) {
   const qrCanvas = document.getElementById("qrcode");
-  if (!qrCanvas) return;
-
-  if (typeof QRCode !== "undefined") {
-    QRCode.toCanvas(qrCanvas, roomUrl, { width: 200 }, (err) => {
-      if (err) console.error("生成 QRCode 失敗:", err);
-    });
-  } else {
-    console.error("QRCode 庫沒有載入");
+  if (!qrCanvas) {
+    console.error("找不到 #qrcode");
+    return;
   }
+
+  console.log("生成 QRCode:", roomUrl);
+
+  QRCode.toCanvas(qrCanvas, roomUrl, { width: 200 }, (err) => {
+    if (err) console.error("生成 QRCode 失敗:", err);
+  });
 }
+
 
 
