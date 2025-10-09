@@ -86,3 +86,7 @@ document.getElementById("startScreenBtn").onclick = () => {
 document.getElementById("stopScreenBtn").onclick = () => {
   screenShare.stopScreenShare();
 };
+
+document.querySelector("#fileInput").addEventListener("change", () => {
+  showMemberSelectForFile(myId, members);
+});
