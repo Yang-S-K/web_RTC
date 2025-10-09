@@ -7,7 +7,8 @@ const configuration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-  ]
+  ],
+  // 可依需要補 TURN：{ urls: 'turn:your.turn.server', username: 'user', credential: 'pass' }
 };
 
 export let peerConnections = {};
@@ -58,6 +59,35 @@ async function maybeApplyPendingAnswer(peerId) {
   catch (err) { console.error('信號處理錯誤:', err); }
 }
 
+// ICE Restart：卡住太久或 failed 時，由 initiator 端重新送 offer
+async function maybeIceRestart(peerId, roomId, localUserId) {
+  const pc = peerConnections[peerId];
+  const st = peerSignalStates[peerId];
+  if (!pc || !st) return;
+
+  if (st.restarting) return;
+  st.restarting = true;
+  try {
+    const offer = await pc.createOffer({ iceRestart: true });
+    await pc.setLocalDescription(offer);
+    await set(ref(db, `rooms/${roomId}/signals/${localUserId}_to_${peerId}`), { offer });
+    log(`🔁 重新啟動 ICE 並送出 offer 給 ${peerId}`);
+  } catch (e) {
+    console.error('ICE Restart 失敗:', e);
+  } finally {
+    setTimeout(() => { st.restarting = false; }, 5000);
+  }
+}
+
+// 供其他模組查詢
+export function isPeerConnected(peerId) {
+  const pc = peerConnections[peerId];
+  if (!pc) return false;
+  return pc.connectionState === 'connected'
+      || pc.iceConnectionState === 'connected'
+      || pc.iceConnectionState === 'completed';
+}
+
 // ------------ 清理 ------------
 export function cleanupPeer(peerId) {
   const pc = peerConnections[peerId];
@@ -80,13 +110,18 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
   const pc = new RTCPeerConnection(configuration);
   peerConnections[peerId] = pc;
 
-  // 連線狀態 log（除錯用）
+  // 狀態 log（方便判斷卡在哪）
   pc.oniceconnectionstatechange = () => {
     console.log(`[ICE] ${peerId}:`, pc.iceConnectionState);
   };
   pc.onconnectionstatechange = () => {
     console.log(`[CONN] ${peerId}:`, pc.connectionState);
     log(`🔗 與 ${peerId} 的連接狀態: ${pc.connectionState}`);
+    if (pc.connectionState === 'connected') {
+      // 連上時清掉延遲重啟的計時器
+      const st = peerSignalStates[peerId];
+      if (st?.checkingTimer) { clearTimeout(st.checkingTimer); st.checkingTimer = null; }
+    }
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
       cleanupPeer(peerId);
     }
@@ -101,6 +136,8 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
     processingAnswer: false,
     pendingRemoteCandidates: [],       // SDP 未就緒時先排隊
     processedCandidateKeys: new Set(), // 避免重覆 add
+    restarting: false,
+    checkingTimer: null,
   };
 
   // 清掉舊的監聽
@@ -214,6 +251,15 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
       await set(ref(db, `rooms/${roomId}/signals/${localUserId}_to_${peerId}`), { offer });
       await maybeApplyPendingAnswer(peerId);
       log(`📡 已發送連接請求給 ${peerId}`);
+
+      // 如果一直卡在 checking 太久，自動做一次 ICE Restart
+      const st = peerSignalStates[peerId];
+      if (st.checkingTimer) clearTimeout(st.checkingTimer);
+      st.checkingTimer = setTimeout(() => {
+        if (!isPeerConnected(peerId)) {
+          maybeIceRestart(peerId, roomId, localUserId);
+        }
+      }, 8000);
     } catch (err) {
       console.error('創建 offer 失敗:', err);
     }
