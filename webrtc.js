@@ -6,7 +6,7 @@ import { setupDataChannel, removeDataChannel } from './fileTransfer.js';
 const configuration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
   ]
 };
 
@@ -14,54 +14,37 @@ export let peerConnections = {};
 export let peerSignalStates = {};
 export let peerSignalSubscriptions = {};
 
-// 關閉並清理指定 Peer
-export function cleanupPeer(peerId) {
-  const pc = peerConnections[peerId];
-  if (pc) {
-    try { pc.close(); } catch (e) { console.error('關閉 PeerConnection 失敗:', e); }
-    delete peerConnections[peerId];
-  }
-  const subs = peerSignalSubscriptions[peerId];
-  if (subs) {
-    subs.signal?.();
-    subs.candidates?.();
-    delete peerSignalSubscriptions[peerId];
-  }
-  if (peerSignalStates[peerId]) delete peerSignalStates[peerId];
-  removeDataChannel(peerId);
-}
-
+// ------------ 工具 ------------
 function flushPendingCandidates(peerId) {
   const pc = peerConnections[peerId];
   const st = peerSignalStates[peerId];
-  if (!pc || !st || !st.pendingRemoteCandidates) return;
-  const pending = st.pendingRemoteCandidates;
+  if (!pc || !st) return;
+  const list = st.pendingRemoteCandidates || [];
   st.pendingRemoteCandidates = [];
-  pending.forEach(async (cand) => {
+  list.forEach(async (cand) => {
     try { await pc.addIceCandidate(cand); }
     catch (e) { console.error('flush candidate 失敗:', e); }
   });
 }
 
-// 將遠端 answer 套用到本地
 async function applyRemoteAnswer(peerId, answer) {
   const pc = peerConnections[peerId];
   const state = peerSignalStates[peerId];
   if (!pc || !state || !answer?.sdp) return false;
 
-  if (state.lastProcessedAnswerSdp === answer.sdp) return false; // 去重
+  // 去重
+  if (state.lastProcessedAnswerSdp === answer.sdp) return false;
 
-  // 只有在已經 setLocalDescription(offer) 後才吃 answer
+  // 必須先送出本地 offer 才能吃 answer
   if (!pc.localDescription || pc.localDescription.type !== 'offer') {
     if (!state.pendingAnswer || state.pendingAnswer.sdp !== answer.sdp) {
-      state.pendingAnswer = answer;
+      state.pendingAnswer = answer; // 等本地 offer 完成後再吃
     }
     return false;
   }
 
   await pc.setRemoteDescription(answer);
   flushPendingCandidates(peerId);
-  
   state.lastProcessedAnswerSdp = answer.sdp;
   state.pendingAnswer = null;
   log(`✅ 已接收 ${peerId} 的回應`);
@@ -75,19 +58,49 @@ async function maybeApplyPendingAnswer(peerId) {
   catch (err) { console.error('信號處理錯誤:', err); }
 }
 
-// 建立 PeerConnection（唯一入口）
+// ------------ 清理 ------------
+export function cleanupPeer(peerId) {
+  const pc = peerConnections[peerId];
+  if (pc) {
+    try { pc.close(); } catch (e) { console.error('關閉 PeerConnection 失敗:', e); }
+    delete peerConnections[peerId];
+  }
+  const subs = peerSignalSubscriptions[peerId];
+  if (subs) {
+    subs.signal?.();
+    subs.candidates?.();
+    delete peerSignalSubscriptions[peerId];
+  }
+  delete peerSignalStates[peerId];
+  removeDataChannel(peerId);
+}
+
+// ------------ 主要：建立連線 ------------
 export async function createPeerConnection(peerId, isInitiator, roomId, localUserId) {
   const pc = new RTCPeerConnection(configuration);
   peerConnections[peerId] = pc;
 
-  // ⚠️ 這段只能放在函式內，否則會出現 peerId 未定義
+  // 連線狀態 log（除錯用）
+  pc.oniceconnectionstatechange = () => {
+    console.log(`[ICE] ${peerId}:`, pc.iceConnectionState);
+  };
+  pc.onconnectionstatechange = () => {
+    console.log(`[CONN] ${peerId}:`, pc.connectionState);
+    log(`🔗 與 ${peerId} 的連接狀態: ${pc.connectionState}`);
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
+      cleanupPeer(peerId);
+    }
+  };
+
+  // 每個 peer 的信令狀態
   peerSignalStates[peerId] = {
     lastProcessedOfferSdp: null,
     lastProcessedAnswerSdp: null,
     pendingAnswer: null,
     processingOffer: false,
     processingAnswer: false,
-    pendingRemoteCandidates: [],
+    pendingRemoteCandidates: [],       // SDP 未就緒時先排隊
+    processedCandidateKeys: new Set(), // 避免重覆 add
   };
 
   // 清掉舊的監聽
@@ -97,7 +110,7 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
   }
   peerSignalSubscriptions[peerId] = {};
 
-  // 建立 / 接收 DataChannel
+  // DataChannel
   if (isInitiator) {
     const channel = pc.createDataChannel("fileTransfer");
     setupDataChannel(channel, peerId);
@@ -110,27 +123,17 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
     };
   }
 
-  // 發送 ICE
+  // 我方 ICE -> 寫到 Firebase
   pc.onicecandidate = (event) => {
     if (event.candidate) {
-      const candidateRef = ref(
-        db,
-        `rooms/${roomId}/signals/${localUserId}_to_${peerId}/candidates/${Date.now()}`
-      );
-      set(candidateRef, { candidate: event.candidate, timestamp: Date.now() })
+      const key = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+      const candidateRef = ref(db, `rooms/${roomId}/signals/${localUserId}_to_${peerId}/candidates/${key}`);
+      set(candidateRef, { candidate: event.candidate, ts: Date.now() })
         .catch(err => console.error('發送 ICE candidate 失敗:', err));
     }
   };
 
-  // 連線狀態
-  pc.onconnectionstatechange = () => {
-    log(`🔗 與 ${peerId} 的連接狀態: ${pc.connectionState}`);
-    if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
-      cleanupPeer(peerId);
-    }
-  };
-
-  // 監聽對方 -> 我 的信令（offer/answer）
+  // 對方 -> 我 的信令 (offer/answer)
   const signalRef = ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}`);
   peerSignalSubscriptions[peerId].signal = onValue(signalRef, async (snapshot) => {
     const signal = snapshot.val();
@@ -141,7 +144,7 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
     const state  = peerSignalStates[peerId];
     if (!state) return;
 
-    // ---- Offer Handling（我方要回 Answer）----
+    // ---- Offer（我方要回 Answer）----
     if (offer?.sdp && state.lastProcessedOfferSdp !== offer.sdp && !state.processingOffer) {
       state.processingOffer = true;
       try {
@@ -166,7 +169,7 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
       }
     }
 
-    // ---- Answer Handling（我方是發起者，要吃 Answer）----
+    // ---- Answer（我方是發起者，要吃 Answer）----
     if (answer?.sdp && !state.processingAnswer) {
       state.processingAnswer = true;
       try { await applyRemoteAnswer(peerId, answer); }
@@ -175,24 +178,27 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
     }
   });
 
-  // 監聽對方的 ICE
+  // 對方 ICE -> 我
   const candidatesRef = ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}/candidates`);
   peerSignalSubscriptions[peerId].candidates = onValue(candidatesRef, (snapshot) => {
-    const candidates = snapshot.val();
-    if (!candidates) return;
-    Object.values(candidates).forEach(async (data) => {
+    const pcNow = peerConnections[peerId];
+    const st = peerSignalStates[peerId];
+    if (!pcNow || !st) return;
+
+    const data = snapshot.val();
+    if (!data) return;
+
+    Object.entries(data).forEach(async ([key, val]) => {
+      if (!val?.candidate) return;
+      if (st.processedCandidateKeys.has(key)) return; // 去重
+      st.processedCandidateKeys.add(key);
+
+      const cand = new RTCIceCandidate(val.candidate);
       try {
-        if (data.candidate && pc.remoteDescription) {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        }
-        if (data.candidate) {
-           const cand = new RTCIceCandidate(data.candidate);
-           if (pc.remoteDescription) {
-             await pc.addIceCandidate(cand);
-           } else {
-             // 先排隊，等 setRemoteDescription 完成後再 flush
-             peerSignalStates[peerId]?.pendingRemoteCandidates?.push(cand);
-           }
+        if (pcNow.remoteDescription) {
+          await pcNow.addIceCandidate(cand);
+        } else {
+          st.pendingRemoteCandidates.push(cand); // 先排隊，等 SDP
         }
       } catch (err) {
         console.error('添加 ICE candidate 失敗:', err);
