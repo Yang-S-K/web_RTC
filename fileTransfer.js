@@ -172,8 +172,8 @@ function getConnectedMembers() {
 
 // 顯示檔案傳送對象選擇清單
 function showMemberSelectForFile(file) {
-  const others = getOtherMembers(currentId, allMembers);
-  console.log("其他成員：", others);  
+  const others = getOtherMembers(myId, allMembers);
+  console.log("其他成員：", others);
   const modal = document.getElementById("memberModal");
   const memberList = document.getElementById("memberList");
   memberList.innerHTML = "<h3 style='color: #667eea; margin-bottom: 15px;'>選擇傳送對象：</h3>";
