@@ -309,5 +309,9 @@ export async function updateCurrentUserName(newName) {
 }
 
 export function getOtherMembers(currentId, members) {
+  if (!members || typeof members !== "object") {
+    return []; // 傳回空陣列避免報錯
+  }
   return Object.keys(members).filter(id => id !== currentId);
 }
+
