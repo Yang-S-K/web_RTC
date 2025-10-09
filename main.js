@@ -1,3 +1,4 @@
+// main.js
 import './firebase.js';
 import * as webrtc from './webrtc.js';
 import * as chat from './chat.js';
@@ -7,13 +8,14 @@ import * as members from './members.js';
 import './games.js';
 import * as ui from './ui.js';
 
-// 初始化聊天模組的使用者資訊
+// 初始：讓聊天模組知道目前使用者
 chat.setCurrentUser(members.currentUserId, members.currentUserName);
 
-// 將取消檔案傳輸函式掛載到全域，供按鈕 onclick 呼叫
+// 讓舊的 onclick 寫法也能用（向後相容）
 window.cancelFileTransfer = fileTransfer.cancelFileTransfer;
+window.showMemberSelectForFile = fileTransfer.showMemberSelectForFile;
 
-// 網頁載入時自動加入房間（若 URL 帶有房號參數）
+// 自動加入 (?room=)
 window.addEventListener("load", () => {
   const urlParams = new URLSearchParams(window.location.search);
   const roomParam = urlParams.get("room");
@@ -22,7 +24,7 @@ window.addEventListener("load", () => {
   }
 });
 
-// 綁定 UI 按鈕事件
+// UI 綁定
 document.getElementById("createRoomBtn").onclick = () => {
   members.createRoom();
 };
@@ -35,10 +37,7 @@ document.getElementById("shareBtn").onclick = () => {
 
 document.getElementById("joinRoomBtn").onclick = () => {
   const roomId = document.getElementById("joinRoomId").value.trim();
-  if (!roomId) {
-    alert("請輸入房號");
-    return;
-  }
+  if (!roomId) { alert("請輸入房號"); return; }
   members.joinRoom(roomId);
 };
 
@@ -86,7 +85,3 @@ document.getElementById("startScreenBtn").onclick = () => {
 document.getElementById("stopScreenBtn").onclick = () => {
   screenShare.stopScreenShare();
 };
-
-document.querySelector("#fileInput").addEventListener("change", () => {
-  showMemberSelectForFile(myId, members);
-});
