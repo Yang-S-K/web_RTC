@@ -31,6 +31,18 @@ export function cleanupPeer(peerId) {
   removeDataChannel(peerId);
 }
 
+function flushPendingCandidates(peerId) {
+  const pc = peerConnections[peerId];
+  const st = peerSignalStates[peerId];
+  if (!pc || !st || !st.pendingRemoteCandidates) return;
+  const pending = st.pendingRemoteCandidates;
+  st.pendingRemoteCandidates = [];
+  pending.forEach(async (cand) => {
+    try { await pc.addIceCandidate(cand); }
+    catch (e) { console.error('flush candidate 失敗:', e); }
+  });
+}
+
 // 將遠端 answer 套用到本地
 async function applyRemoteAnswer(peerId, answer) {
   const pc = peerConnections[peerId];
@@ -48,6 +60,8 @@ async function applyRemoteAnswer(peerId, answer) {
   }
 
   await pc.setRemoteDescription(answer);
+  flushPendingCandidates(peerId);
+  
   state.lastProcessedAnswerSdp = answer.sdp;
   state.pendingAnswer = null;
   log(`✅ 已接收 ${peerId} 的回應`);
@@ -73,6 +87,7 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
     pendingAnswer: null,
     processingOffer: false,
     processingAnswer: false,
+    pendingRemoteCandidates: [],
   };
 
   // 清掉舊的監聽
@@ -133,6 +148,7 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
         const needSetRemote = !pc.currentRemoteDescription || pc.currentRemoteDescription.sdp !== offer.sdp;
         if (needSetRemote) {
           await pc.setRemoteDescription(offer);
+          flushPendingCandidates(peerId);
         }
 
         if (pc.signalingState === 'have-remote-offer') {
@@ -168,6 +184,15 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
       try {
         if (data.candidate && pc.remoteDescription) {
           await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+        if (data.candidate) {
+           const cand = new RTCIceCandidate(data.candidate);
+           if (pc.remoteDescription) {
+             await pc.addIceCandidate(cand);
+           } else {
+             // 先排隊，等 setRemoteDescription 完成後再 flush
+             peerSignalStates[peerId]?.pendingRemoteCandidates?.push(cand);
+           }
         }
       } catch (err) {
         console.error('添加 ICE candidate 失敗:', err);
