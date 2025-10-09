@@ -71,6 +71,14 @@ async function maybeApplyPendingAnswer(peerId) {
   }
 }
 
+peerSignalStates[peerId] = {
+  lastProcessedOfferSdp: null,
+  lastProcessedAnswerSdp: null,
+  pendingAnswer: null,
+  processingOffer: false,
+  processingAnswer: false,
+};
+
 // 建立新的 PeerConnection 並視情況發送或接收 Offer
 export async function createPeerConnection(peerId, isInitiator, roomId, localUserId) {
   const pc = new RTCPeerConnection(configuration);
@@ -119,30 +127,59 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
     }
   };
 
-  // 監聽遠端信令 (Offer/Answer)
-  const signalRef = ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}`);
-  peerSignalSubscriptions[peerId].signal = onValue(signalRef, async (snapshot) => {
-    const signal = snapshot.val();
-    if (!signal) return;
-    const offer = signal.offer;
-    const answer = signal.answer;
-    const state = peerSignalStates[peerId];
-    if (!state) return;
+// 監聽遠端信令 (Offer / Answer) —— 加上去重與狀態鎖
+const signalRef = ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}`);
+peerSignalSubscriptions[peerId].signal = onValue(signalRef, async (snapshot) => {
+  const signal = snapshot.val();
+  if (!signal) return;
+
+  const offer  = signal.offer;
+  const answer = signal.answer;
+  const state  = peerSignalStates[peerId];
+  if (!state) return;
+
+  // ====== Offer Handling (對方是發起者、我方應該回 Answer) ======
+  if (offer?.sdp && state.lastProcessedOfferSdp !== offer.sdp && !state.processingOffer) {
+    state.processingOffer = true;
     try {
-      if (offer?.sdp && state.lastProcessedOfferSdp !== offer.sdp) {
+      // 若目前沒有相同 remoteDescription，就設定
+      const needSetRemote =
+        !pc.currentRemoteDescription || pc.currentRemoteDescription.sdp !== offer.sdp;
+      if (needSetRemote) {
         await pc.setRemoteDescription(offer);
-        state.lastProcessedOfferSdp = offer.sdp;
+      }
+
+      // 只有在 have-remote-offer 才能建立/設定本地 answer
+      if (pc.signalingState === 'have-remote-offer') {
         const answerDesc = await pc.createAnswer();
         await pc.setLocalDescription(answerDesc);
         await set(ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}/answer`), answerDesc);
         log(`📡 已回應 ${peerId} 的連接請求`);
-      } else if (answer?.sdp) {
-        await applyRemoteAnswer(peerId, answer);
       }
+
+      // 標記這個 offer 已處理，避免重覆進入
+      state.lastProcessedOfferSdp = offer.sdp;
+
     } catch (err) {
-      console.error('信號處理錯誤:', err);
+      console.error('處理 offer 失敗:', err, 'signalingState=', pc.signalingState);
+    } finally {
+      state.processingOffer = false;
     }
-  });
+  }
+
+  // ====== Answer Handling (我方是發起者、要套用對方的 answer) ======
+  if (answer?.sdp && !state.processingAnswer) {
+    state.processingAnswer = true;
+    try {
+      await applyRemoteAnswer(peerId, answer);
+    } catch (err) {
+      console.error('處理 answer 失敗:', err);
+    } finally {
+      state.processingAnswer = false;
+    }
+  }
+});
+
 
   // 監聽 ICE Candidate 訊息
   const candidatesRef = ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}/candidates`);
