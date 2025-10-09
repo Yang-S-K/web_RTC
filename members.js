@@ -307,3 +307,7 @@ export async function updateCurrentUserName(newName) {
     log("❌ 更新名稱失敗: " + err.message);
   }
 }
+
+export function getOtherMembers(currentId, members) {
+  return Object.keys(members).filter(id => id !== currentId);
+}
