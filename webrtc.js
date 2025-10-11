@@ -6,7 +6,6 @@ import { setupDataChannel, removeDataChannel } from './fileTransfer.js';
 const configuration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-  ],
   {
       urls: [
         'turn:global.turn.xirsys.net:3478?transport=udp',
@@ -16,6 +15,7 @@ const configuration = {
       username: 'P51tjcByQ-Dj5C6V_qqVwxNnVUDcxIoyMGt0RRac90JmlNUeTrVMw1nJUsYejeL7AAAAAGjqisR5c2tqYW54dmk=', 
       credential: '5acd5a72-a6c2-11f0-97a4-0242ac120004' 
     }
+  ]
 };
 
 export let peerConnections = {};
