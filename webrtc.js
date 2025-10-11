@@ -177,50 +177,56 @@ export async function createPeerConnection(peerId, isInitiator, roomId, localUse
     }
   };
 
-  // 對方 -> 我 的信令 (offer/answer)
-  const signalRef = ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}`);
-  peerSignalSubscriptions[peerId].signal = onValue(signalRef, async (snapshot) => {
-    const signal = snapshot.val();
-    if (!signal) return;
+// 正確：initiator 監聽 A_to_B；非 initiator 監聽 B(對方)_to_A(我)
+const path = isInitiator
+  ? `${localUserId}_to_${peerId}`     // 我發起 → 我要監聽自己寫的那條（等對方把 answer 寫回來）
+  : `${peerId}_to_${localUserId}`;    // 我不是發起 → 監聽對方給我的 offer 那條
 
-    const offer  = signal.offer;
-    const answer = signal.answer;
-    const state  = peerSignalStates[peerId];
-    if (!state) return;
+const signalRef = ref(db, `rooms/${roomId}/signals/${path}`);
+peerSignalSubscriptions[peerId].signal = onValue(signalRef, async (snapshot) => {
+  const signal = snapshot.val();
+  if (!signal) return;
 
-    // ---- Offer（我方要回 Answer）----
-    if (offer?.sdp && state.lastProcessedOfferSdp !== offer.sdp && !state.processingOffer) {
-      state.processingOffer = true;
-      try {
-        const needSetRemote = !pc.currentRemoteDescription || pc.currentRemoteDescription.sdp !== offer.sdp;
-        if (needSetRemote) {
-          await pc.setRemoteDescription(offer);
-          flushPendingCandidates(peerId);
-        }
+  const offer  = signal.offer;
+  const answer = signal.answer;
+  const state  = peerSignalStates[peerId];
+  if (!state) return;
 
-        if (pc.signalingState === 'have-remote-offer') {
-          const answerDesc = await pc.createAnswer();
-          await pc.setLocalDescription(answerDesc);
-          await set(ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}/answer`), answerDesc);
-          log(`📡 已回應 ${peerId} 的連接請求`);
-        }
+  // —— 收到對方的 offer（只有非 initiator 會遇到）——
+  if (offer?.sdp && state.lastProcessedOfferSdp !== offer.sdp && !state.processingOffer) {
+    state.processingOffer = true;
+    try {
+      await pc.setRemoteDescription(offer);
+      flushPendingCandidates(peerId);
 
-        state.lastProcessedOfferSdp = offer.sdp; // 去重標記
-      } catch (err) {
-        console.error('處理 offer 失敗:', err, 'signalingState=', pc.signalingState);
-      } finally {
-        state.processingOffer = false;
+      if (pc.signalingState === 'have-remote-offer') {
+        const answerDesc = await pc.createAnswer();
+        await pc.setLocalDescription(answerDesc);
+        // 重要：answer 要寫回「同一條路徑」（path）底下的 /answer
+        await set(ref(db, `rooms/${roomId}/signals/${path}/answer`), answerDesc);
+        log(`📡 已回應 ${peerId} 的連接請求`);
       }
+      state.lastProcessedOfferSdp = offer.sdp;
+    } catch (err) {
+      console.error('處理 offer 失敗:', err);
+    } finally {
+      state.processingOffer = false;
     }
+  }
 
-    // ---- Answer（我方是發起者，要吃 Answer）----
-    if (answer?.sdp && !state.processingAnswer) {
-      state.processingAnswer = true;
-      try { await applyRemoteAnswer(peerId, answer); }
-      catch (err) { console.error('處理 answer 失敗:', err); }
-      finally { state.processingAnswer = false; }
+  // —— 發起方收到對方 answer（只有 initiator 會遇到）——
+  if (answer?.sdp && !state.processingAnswer) {
+    state.processingAnswer = true;
+    try {
+      await applyRemoteAnswer(peerId, answer);   // 你的原本函式
+    } catch (err) {
+      console.error('處理 answer 失敗:', err);
+    } finally {
+      state.processingAnswer = false;
     }
-  });
+  }
+});
+
 
   // 對方 ICE -> 我
   const candidatesRef = ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}/candidates`);
