@@ -7,6 +7,7 @@ import * as screenShare from './screenShare.js';
 import * as members from './members.js';
 import './games.js';
 import * as ui from './ui.js';
+import { fillJoinInputWithLastRoom } from './ui.js';
 
 // 初始：讓聊天模組知道目前使用者
 chat.setCurrentUser(members.currentUserId, members.currentUserName);
@@ -21,6 +22,8 @@ window.addEventListener("load", () => {
   const roomParam = urlParams.get("room");
   if (roomParam) {
     members.joinRoom(roomParam);
+  } else {
+    fillJoinInputWithLastRoom(); // 沒有參數就把上次房號填回
   }
 });
 
