@@ -1,5 +1,6 @@
 // fileTransfer.js
 import { currentMembers, currentUserId } from './members.js';
+import { isPeerConnected } from './webrtc.js';
 import { log, addFileToList, updateFileProgress, updateFileStatus, formatFileSize } from './ui.js';
 
 export const dataChannels = {};
@@ -11,13 +12,19 @@ let isFileDialogOpen = false;
 export function setupDataChannel(channel, peerId) {
   channel.binaryType = 'arraybuffer';
 
-  channel.onopen = () => { log(`✅ DataChannel 已連接: ${peerId}`); };
-  channel.onclose = () => { log(`❌ DataChannel 已關閉: ${peerId}`); };
-  channel.onerror = (error) => { log(`❌ DataChannel 錯誤: ${error}`); };
-
-  channel.onmessage = (event) => {
+  // 用 addEventListener 讓我們可以在 ensureChannelOpen 裡再加監聽
+  channel.addEventListener('open', () => {
+    log(`✅ DataChannel 已連接: ${peerId}`);
+  });
+  channel.addEventListener('close', () => {
+    log(`❌ DataChannel 已關閉: ${peerId}`);
+  });
+  channel.addEventListener('error', (e) => {
+    log(`❌ DataChannel 錯誤: ${e?.message || e}`);
+  });
+  channel.addEventListener('message', (event) => {
     handleDataChannelMessage(event.data, peerId);
-  };
+  });
 
   dataChannels[peerId] = channel;
 }
@@ -26,20 +33,55 @@ export function removeDataChannel(peerId) {
   if (dataChannels[peerId]) delete dataChannels[peerId];
 }
 
-// ---- 安全取得其他/已連線成員 ----
+// ---- 工具：安全取得成員 ----
 function getOtherMembersSafe() {
   if (!currentMembers || typeof currentMembers !== 'object') return [];
   return Object.entries(currentMembers).filter(([id]) => id !== currentUserId);
 }
 
-function getConnectedMembersSafe() {
-  return getOtherMembersSafe().filter(([memberId]) => {
-    const ch = dataChannels[memberId];
-    return ch && ch.readyState === 'open';
+// 允許先選人，再等待通道開啟
+async function ensureChannelOpen(peerId, timeoutMs = 8000) {
+  // 已有且為 open
+  const existing = dataChannels[peerId];
+  if (existing && existing.readyState === 'open') return existing;
+
+  // 如果尚未建立通道，持續輪詢一下
+  return await new Promise((resolve, reject) => {
+    let finished = false;
+
+    const tryResolve = () => {
+      if (finished) return;
+      const ch = dataChannels[peerId];
+      if (ch && ch.readyState === 'open') {
+        finished = true;
+        cleanup();
+        resolve(ch);
+      }
+    };
+
+    const poll = setInterval(tryResolve, 200);
+
+    // 若目前已有通道物件，監聽其 open
+    let ch = dataChannels[peerId];
+    const onOpen = () => { tryResolve(); };
+    ch?.addEventListener?.('open', onOpen);
+
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      reject(new Error('DataChannel 開啟逾時'));
+    }, timeoutMs);
+
+    function cleanup() {
+      clearInterval(poll);
+      clearTimeout(timer);
+      ch?.removeEventListener?.('open', onOpen);
+    }
   });
 }
 
-// ---- 對外：檔案對象選擇視窗 ----
+// ---- UI：選擇傳送對象（改為可先選人，再等待連線）----
 export function showMemberSelectForFile(file) {
   const modal = document.getElementById("memberModal");
   const memberList = document.getElementById("memberList");
@@ -53,15 +95,17 @@ export function showMemberSelectForFile(file) {
     return;
   }
 
-  const available = getConnectedMembersSafe();
-  if (available.length === 0) {
-    memberList.innerHTML += "<p style='color: #999; text-align: center;'>與其他成員的連接尚未建立，請稍後再試</p>";
-    modal.classList.remove("hidden");
-    return;
-  }
-
-  available.forEach(([memberId, memberData]) => {
+  // 顯示所有其他成員，但加上狀態
+  others.forEach(([memberId, memberData]) => {
     const name = (memberData && memberData.name) ? memberData.name : ("使用者" + memberId.substring(0, 4));
+    const dc = dataChannels[memberId];
+    const dcOpen = !!(dc && dc.readyState === 'open');
+    const connected = isPeerConnected(memberId);
+
+    const statusText = dcOpen
+      ? '可傳送'
+      : (connected ? '連線已建立，等待通道…' : '連接中…');
+
     const item = document.createElement("div");
     item.className = "member-item";
     item.style.cursor = "pointer";
@@ -70,12 +114,23 @@ export function showMemberSelectForFile(file) {
         <div class="member-avatar">${name.charAt(0).toUpperCase()}</div>
         <span class="member-name">${name}</span>
       </div>
-      <span style="color: #667eea;">➤</span>
+      <span style="color:${dcOpen ? '#16a34a' : '#a3a3a3'};font-size:14px;">${statusText}</span>
     `;
-    item.onclick = () => {
-      sendFile(file, memberId);
-      modal.classList.add("hidden");
+
+    item.onclick = async () => {
+      try {
+        if (!connected) {
+          log(`⏳ 正在等待與 ${name} 建立連線…`);
+        }
+        // 等待 DataChannel open（最長 8 秒）
+        await ensureChannelOpen(memberId, 8000);
+        sendFile(file, memberId);
+        modal.classList.add("hidden");
+      } catch (e) {
+        alert(`與 ${name} 的連線尚未就緒，請稍後再試（${e.message || e}）`);
+      }
     };
+
     memberList.appendChild(item);
   });
 
@@ -155,6 +210,14 @@ function completeFileReceive(transferId) {
 
 // ---- 發送檔案 ----
 export async function sendFile(file, targetPeerId) {
+  // 若通道尚未 open，先等它開
+  try {
+    await ensureChannelOpen(targetPeerId, 8000);
+  } catch (e) {
+    alert('與該成員的連接未建立，請稍後再試');
+    return;
+  }
+
   const channel = dataChannels[targetPeerId];
   if (!channel || channel.readyState !== 'open') {
     alert('與該成員的連接未建立');
@@ -233,7 +296,7 @@ export function cancelFileTransfer(transferId) {
   }
 }
 
-// ---- 綁定 input / drop 區事件（保留原行為）----
+// ---- input / drop 事件（保留原行為）----
 const fileInput = document.getElementById('fileInput');
 const dropZone = document.getElementById('fileDropZone');
 
