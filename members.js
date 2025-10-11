@@ -2,6 +2,7 @@
 import { db, ref, set, get, remove, onValue, update } from './firebase.js';
 import { peerConnections, createPeerConnection, cleanupPeer, disconnectAllPeers } from './webrtc.js';
 import { showInRoomUI, updateMemberCount, updateRoomLinkUI, getRoomShareUrl, updateBrowserUrl, resetUI, log } from './ui.js';
+import { setRoomParamInUrl, rememberLastRoomId, fillJoinInputWithLastRoom } from './ui.js';
 import { initChatListener, stopChatListener, clearChatMessages, setCurrentRoom, setCurrentUser } from './chat.js';
 import { stopScreenShare } from './screenShare.js';
 
@@ -213,6 +214,8 @@ export async function createRoom() {
 
   log("🎯 你是 Host");
   log("✅ 建立房間: " + currentRoomId);
+  rememberLastRoomId(currentRoomId);
+  setRoomParamInUrl(currentRoomId);
 }
 
 export async function joinRoom(roomId) {
@@ -242,11 +245,13 @@ export async function joinRoom(roomId) {
   updateRoomLinkUI(roomUrl);
 
   log("✅ 加入房間: " + roomId);
+  rememberLastRoomId(currentRoomId);
+  setRoomParamInUrl(currentRoomId);
 }
 
 export async function leaveRoom() {
   if (!currentRoomId) return;
-
+  const lastId = currentRoomId;
   if (membersListener) { membersListener(); membersListener = null; }
   if (hostListener) { hostListener(); hostListener = null; }
 
@@ -281,8 +286,10 @@ export async function leaveRoom() {
   }
 
   log("👋 已離開房間: " + currentRoomId);
-  currentRoomId = null;
-  currentMembers = {};
+  setRoomParamInUrl(null);
+  rememberLastRoomId(lastId);
+  fillJoinInputWithLastRoom();
+
   clearChatMessages();
   resetUI();
 }
