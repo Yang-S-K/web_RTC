@@ -6,9 +6,15 @@ import { setupDataChannel, removeDataChannel } from './fileTransfer.js';
 const configuration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
   ],
-  // 可依需要補 TURN：{ urls: 'turn:your.turn.server', username: 'user', credential: 'pass' }
+      urls: [
+        'turn:global.turn.xirsys.net:3478?transport=udp',
+        'turn:global.turn.xirsys.net:3478?transport=tcp',
+        'turns:global.turn.xirsys.net:5349?transport=tcp'
+      ],
+      username: 'P51tjcByQ-Dj5C6V_qqVwxNnVUDcxIoyMGt0RRac90JmlNUeTrVMw1nJUsYejeL7AAAAAGjqisR5c2tqYW54dmk=', 
+      credential: '5acd5a72-a6c2-11f0-97a4-0242ac120004' 
+    }
 };
 
 export let peerConnections = {};
