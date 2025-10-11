@@ -138,3 +138,27 @@ export async function shareRoomLink(url) {
     }
   }
 }
+
+// === URL 與房號記憶 ===
+export function setRoomParamInUrl(roomId) {
+  const url = new URL(window.location.href);
+  if (roomId) url.searchParams.set('room', roomId);
+  else url.searchParams.delete('room');
+  window.history.replaceState({}, '', url.toString());
+}
+
+export function rememberLastRoomId(roomId) {
+  try { localStorage.setItem('lastRoomId', roomId || ''); } catch {}
+}
+
+export function getLastRoomId() {
+  try { return localStorage.getItem('lastRoomId') || ''; } catch { return ''; }
+}
+
+export function fillJoinInputWithLastRoom() {
+  const el = document.getElementById('joinRoomId');
+  const id = getLastRoomId();
+  if (el) el.value = id || '';
+}
+
+
