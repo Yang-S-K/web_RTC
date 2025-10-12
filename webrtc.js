@@ -114,162 +114,151 @@ export function cleanupPeer(peerId) {
 }
 
 export async function createPeerConnection(peerId, isInitiator, roomId, localUserId) {
-  // 1) 建立連線物件
+  // 1) 一定用這個 configuration（含 Xirsys）
   const pc = new RTCPeerConnection(configuration);
   peerConnections[peerId] = pc;
 
-  // 2) 狀態容器（每個 peer 一份）
+  // 狀態容器
   const st = peerSignalStates[peerId] = {
     lastProcessedOfferSdp: null,
     lastProcessedAnswerSdp: null,
-    pendingAnswer: null,
-    processingOffer: false,
-    processingAnswer: false,
     pendingRemoteCandidates: [],
     processedCandidateKeys: new Set(),
-    restarting: false,
-    checkingTimer: null,
+    gotAnyLocalCandidate: false,
   };
 
-  // 3) 偵錯/狀態變化
+  // Debug：看現在真的塞了哪些伺服器
+  try { console.log('[ICE SERVERS IN USE]', pc.getConfiguration().iceServers); } catch {}
+
   pc.addEventListener('icegatheringstatechange', () => {
     console.log(`[GATHER ${peerId}]`, pc.iceGatheringState);
+    if (pc.iceGatheringState === 'complete' && !st.gotAnyLocalCandidate) {
+      console.warn('⚠️ 本地沒有取得任何 ICE 候選（含 relay）。Xirsys 可能沒生效、帳密錯、或 configuration 沒被套用。');
+    }
   });
   pc.addEventListener('iceconnectionstatechange', () => {
     console.log(`[ICE ${peerId}]`, pc.iceConnectionState);
   });
   pc.addEventListener('connectionstatechange', () => {
     console.log(`[CONN ${peerId}]`, pc.connectionState);
-    log(`🔗 與 ${peerId} 的連接狀態: ${pc.connectionState}`);
-    if (pc.connectionState === 'connected' && st.checkingTimer) {
-      clearTimeout(st.checkingTimer);
-      st.checkingTimer = null;
-    }
-    if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+    if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
       cleanupPeer?.(peerId);
     }
   });
 
-  // 4) DataChannel：發起方建立；回應方監聽
+  // 發起方建立 DataChannel；回應方監聽
   if (isInitiator) {
-    const channel = pc.createDataChannel('fileTransfer');
-    setupDataChannel(channel, peerId);
+    const ch = pc.createDataChannel('fileTransfer');
+    setupDataChannel(ch, peerId);
     log(`📡 創建 DataChannel 給 ${peerId}`);
   } else {
-    pc.ondatachannel = (evt) => {
-      setupDataChannel(evt.channel, peerId);
+    pc.ondatachannel = (e) => {
+      setupDataChannel(e.channel, peerId);
       log(`📡 接收 DataChannel 從 ${peerId}`);
     };
   }
 
-  // 5) 本地 ICE 候選 → 寫到「我到對方」的節點
-  pc.onicecandidate = (event) => {
-    if (!event.candidate) return;
-    const key = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const candRef = ref(db, `rooms/${roomId}/signals/${localUserId}_to_${peerId}/candidates/${key}`);
-    const candStr = event.candidate.candidate || '';
+  // 本地 ICE → 寫到我_to_對方；同時印出候選型別（要看到 relay）
+  pc.onicecandidate = (e) => {
+    if (!e.candidate) return;
+    st.gotAnyLocalCandidate = true;
+    const candStr = e.candidate.candidate || '';
     const typ = /typ\s(\w+)/.exec(candStr)?.[1];
     console.log(`[CAND-LOCAL ${peerId}]`, typ, candStr);
-    set(candRef, { candidate: event.candidate, ts: Date.now() })
-      .catch(err => console.error('發送 ICE candidate 失敗:', err));
+
+    const key = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    set(
+      ref(db, `rooms/${roomId}/signals/${localUserId}_to_${peerId}/candidates/${key}`),
+      { candidate: e.candidate, ts: Date.now() }
+    ).catch(err => console.error('發送 ICE candidate 失敗:', err));
   };
 
-  // 6) 對方 ICE 候選（「對方到我」）→ 加到本地
-  const remoteCandRef = ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}/candidates`);
-  peerSignalSubscriptions[peerId]?.candidates?.(); // 取消舊監聽
+  // 對方 ICE（對方_to_我）→ 加入本地；若還沒設遠端 SDP 就先暫存
   peerSignalSubscriptions[peerId] = peerSignalSubscriptions[peerId] || {};
-  peerSignalSubscriptions[peerId].candidates = onValue(remoteCandRef, (snap) => {
-    const data = snap.val();
-    if (!data) return;
-
-    Object.entries(data).forEach(async ([key, val]) => {
-      if (!val?.candidate || st.processedCandidateKeys.has(key)) return;
-      st.processedCandidateKeys.add(key);
-
-      const cand = new RTCIceCandidate(val.candidate);
-      try {
-        if (pc.remoteDescription) {
-          await pc.addIceCandidate(cand);
-        } else {
-          st.pendingRemoteCandidates.push(cand); // 等待 SDP 完成再 flush
+  peerSignalSubscriptions[peerId].candidates?.(); // 取消舊監聽
+  peerSignalSubscriptions[peerId].candidates = onValue(
+    ref(db, `rooms/${roomId}/signals/${peerId}_to_${localUserId}/candidates`),
+    async (snap) => {
+      const data = snap.val();
+      if (!data) return;
+      for (const [key, val] of Object.entries(data)) {
+        if (!val?.candidate || st.processedCandidateKeys.has(key)) continue;
+        st.processedCandidateKeys.add(key);
+        const cand = new RTCIceCandidate(val.candidate);
+        try {
+          if (pc.remoteDescription) await pc.addIceCandidate(cand);
+          else st.pendingRemoteCandidates.push(cand);
+        } catch (err) {
+          console.error('添加 ICE candidate 失敗:', err);
         }
-      } catch (e) {
-        console.error('添加 ICE candidate 失敗:', e);
       }
-    });
-  });
+    }
+  );
 
-  // 7) 信令監聽路徑（關鍵修正）
-  // 發起方要監聽「我_to_對方」(A_to_B)；回應方監聽「對方_to_我」(B_to_A)
+  // 信令路徑：發起方監聽 A_to_B；回應方監聽 B_to_A
   const initiatorPath = `${localUserId}_to_${peerId}`;
   const responderPath = `${peerId}_to_${localUserId}`;
   const path = isInitiator ? initiatorPath : responderPath;
 
-  const signalRef = ref(db, `rooms/${roomId}/signals/${path}`);
   peerSignalSubscriptions[peerId].signal?.(); // 取消舊監聽
-  peerSignalSubscriptions[peerId].signal = onValue(signalRef, async (snapshot) => {
-    const signal = snapshot.val();
-    if (!signal) return;
+  peerSignalSubscriptions[peerId].signal = onValue(
+    ref(db, `rooms/${roomId}/signals/${path}`),
+    async (snapshot) => {
+      const signal = snapshot.val();
+      if (!signal) return;
 
-    const offer = signal.offer;
-    const answer = signal.answer;
+      const offer  = signal.offer;
+      const answer = signal.answer;
 
-    // 我是回應方：收到 offer → 設遠端 → 回寫 answer（寫回同一路徑 /answer）
-    if (!isInitiator && offer?.sdp && st.lastProcessedOfferSdp !== offer.sdp && !st.processingOffer) {
-      st.processingOffer = true;
-      try {
-        await pc.setRemoteDescription(offer);
-        flushPendingCandidates(peerId);
+      // 回應方：收到 offer → 設遠端 → 產生 answer → 寫回同一路徑的 /answer
+      if (!isInitiator && offer?.sdp && st.lastProcessedOfferSdp !== offer.sdp) {
+        try {
+          await pc.setRemoteDescription(offer);
+          // flush 暫存候選
+          for (const c of st.pendingRemoteCandidates.splice(0)) {
+            await pc.addIceCandidate(c);
+          }
 
-        if (pc.signalingState === 'have-remote-offer') {
-          const answerDesc = await pc.createAnswer();
-          await pc.setLocalDescription(answerDesc);
-          await set(ref(db, `rooms/${roomId}/signals/${path}/answer`), answerDesc);
-          log(`📡 已回應 ${peerId} 的連接請求`);
+          if (pc.signalingState === 'have-remote-offer') {
+            const ans = await pc.createAnswer();
+            await pc.setLocalDescription(ans);
+            await set(ref(db, `rooms/${roomId}/signals/${path}/answer`), ans);
+            log(`📡 已回應 ${peerId} 的連接請求`);
+          }
+          st.lastProcessedOfferSdp = offer.sdp;
+        } catch (err) {
+          console.error('處理 offer 失敗:', err, 'state=', pc.signalingState);
         }
+      }
 
-        st.lastProcessedOfferSdp = offer.sdp;
-      } catch (err) {
-        console.error('處理 offer 失敗:', err, 'state=', pc.signalingState);
-      } finally {
-        st.processingOffer = false;
+      // 發起方：等對方把 answer 寫回「同一路徑」
+      if (isInitiator && answer?.sdp && st.lastProcessedAnswerSdp !== answer.sdp) {
+        try {
+          await applyRemoteAnswer(peerId, answer); // 內部請記得 flush 暫存候選；若沒有就仿上面加
+          st.lastProcessedAnswerSdp = answer.sdp;
+          log(`✅ 已接受 ${peerId} 的回應`);
+        } catch (err) {
+          console.error('處理 answer 失敗:', err);
+        }
       }
     }
+  );
 
-    // 我是發起方：在同一路徑上等待對方把 answer 寫回來
-    if (isInitiator && answer?.sdp && !st.processingAnswer) {
-      st.processingAnswer = true;
-      try {
-        await applyRemoteAnswer(peerId, answer);
-      } catch (err) {
-        console.error('處理 answer 失敗:', err);
-      } finally {
-        st.processingAnswer = false;
-      }
-    }
-  });
-
-  // 8) 發起方送 offer（寫到 initiatorPath）
+  // 發起方：送出 offer（寫到 A_to_B）
   if (isInitiator) {
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await set(ref(db, `rooms/${roomId}/signals/${initiatorPath}`), { offer });
       log(`📡 已發送連接請求給 ${peerId}`);
-
-      // 若一直卡在 checking，8 秒後嘗試 ICE restart（有這個輔助函式就會觸發）
-      st.checkingTimer = setTimeout(() => {
-        if (!isPeerConnected?.(peerId)) {
-          maybeIceRestart?.(peerId, roomId, localUserId);
-        }
-      }, 8000);
     } catch (err) {
-      console.error('創建 offer 失敗:', err);
+      console.error('創建/送出 offer 失敗:', err);
     }
   }
 
   return pc;
 }
+
 
 // 斷所有 Peer
 export function disconnectAllPeers() {
