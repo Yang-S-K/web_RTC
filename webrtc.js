@@ -12,8 +12,8 @@ const configuration = {
         'turn:global.turn.xirsys.net:3478?transport=tcp',
         'turns:global.turn.xirsys.net:5349?transport=tcp'
       ],
-      username: 'P51tjcByQ-Dj5C6V_qqVwxNnVUDcxIoyMGt0RRac90JmlNUeTrVMw1nJUsYejeL7AAAAAGjqisR5c2tqYW54dmk=', 
-      credential: '5acd5a72-a6c2-11f0-97a4-0242ac120004' 
+   username: "P51tjcByQ-Dj5C6V_qqVwxNnVUDcxIoyMGt0RRac90JmlNUeTrVMw1nJUsYejeL7AAAAAGjqisR5c2tqYW54dmk=",
+   credential: "5acd5a72-a6c2-11f0-97a4-0242ac120004",
     }
   ],
   iceTransportPolicy: 'relay'
@@ -114,6 +114,38 @@ export function cleanupPeer(peerId) {
 }
 
 export async function createPeerConnection(peerId, isInitiator, roomId, localUserId) {
+  // 這是 createPeerConnection 內部用的 peer 狀態（若沒有就加在函式開頭）
+peerSignalStates[peerId] ||= {};
+const st = peerSignalStates[peerId];
+st.lastProcessedAnswerSdp ??= null;
+
+// ... onValue(signalRef, async (snapshot) => { ... })
+if (isInitiator && answer?.sdp) {
+  // 去重：同一份 answer 只處理一次
+  if (st.lastProcessedAnswerSdp === answer.sdp) return;
+
+  // 只有在 'have-local-offer'（我已送出 offer、等對方答）時才可套用 answer
+  if (pc.signalingState !== 'have-local-offer') {
+    console.warn('跳過重覆/過早的 answer，state=', pc.signalingState);
+    return;
+  }
+
+  try {
+    await pc.setRemoteDescription(answer);
+    st.lastProcessedAnswerSdp = answer.sdp;
+
+    // 如果你有把對方的 candidates 先暫存，這裡一起 flush
+    if (st.pendingRemoteCandidates?.length) {
+      for (const c of st.pendingRemoteCandidates.splice(0)) {
+        await pc.addIceCandidate(c);
+      }
+    }
+    console.log(`✅ 已接受 ${peerId} 的回應`);
+  } catch (err) {
+    console.error('處理 answer 失敗:', err);
+  }
+}
+
   // 1) 一定用這個 configuration（含 Xirsys）
   const pc = new RTCPeerConnection(configuration);
   peerConnections[peerId] = pc;
